@@ -1,0 +1,122 @@
+{
+  "entities": {
+    "Puppy": {
+      "title": "Puppy",
+      "description": "A puppy available for adoption or upcoming.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Male", "Female"] },
+        "dob": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Available", "Reserved", "Upcoming"] },
+        "image": { "type": "string", "description": "URL of the puppy image" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "gender", "dob", "status", "image"]
+    },
+    "Testimonial": {
+      "title": "Testimonial",
+      "description": "A review from a happy family.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "text": { "type": "string" },
+        "image": { "type": "string" },
+        "rating": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "text", "rating"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Application user with roles.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "displayName": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global site settings and company information.",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "location": { "type": "string" },
+        "heroTitle": { "type": "string" },
+        "heroSubtitle": { "type": "string" },
+        "heroImage": { "type": "string", "description": "URL for the hero section background" },
+        "aboutText": { "type": "string" },
+        "aboutImage": { "type": "string", "description": "URL for the primary about section image" },
+        "aboutImage2": { "type": "string", "description": "URL for the secondary about section image" },
+        "instagram": { "type": "string" },
+        "facebook": { "type": "string" }
+      }
+    },
+    "Dog": {
+      "title": "Dog",
+      "description": "An adult dog (Dam or Sire) in the breeding program.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Dam", "Sire"] },
+        "weight": { "type": "string" },
+        "color": { "type": "string" },
+        "image": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "role", "weight", "color", "image"]
+    },
+    "Application": {
+      "title": "Application",
+      "description": "A puppy adoption application.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "location": { "type": "string" },
+        "otherPets": { "type": "string" },
+        "children": { "type": "string" },
+        "interestReason": { "type": "string" },
+        "preferredGender": { "type": "string" },
+        "preferredSize": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "email", "phone", "location", "interestReason", "status"]
+    }
+  },
+  "firestore": {
+    "puppies": {
+      "schema": "Puppy",
+      "description": "Collection of puppies."
+    },
+    "testimonials": {
+      "schema": "Testimonial",
+      "description": "Collection of testimonials."
+    },
+    "users": {
+      "schema": "User",
+      "description": "Collection of users and their roles."
+    },
+    "settings": {
+      "schema": "Settings",
+      "description": "Global configuration document."
+    },
+    "applications": {
+      "schema": "Application",
+      "description": "Collection of adoption applications."
+    },
+    "dogs": {
+      "schema": "Dog",
+      "description": "Collection of adult breeding dogs."
+    }
+  }
+}

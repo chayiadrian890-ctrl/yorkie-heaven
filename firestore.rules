@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: puppies
+    // Fields: name, gender, dob, status, image, description, createdAt
+    //
+    // Collection: testimonials
+    // Fields: name, location, text, image, rating, createdAt
+    //
+    // Collection: users
+    // Fields: email, role, displayName
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "chayiadrian890@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    function isValidPuppy(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.gender in ['Male', 'Female'] &&
+             data.status in ['Available', 'Reserved', 'Upcoming'] &&
+             data.image is string && data.image.size() > 0 &&
+             data.description is string && data.description.size() < 1000;
+    }
+
+    function isValidTestimonial(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 2000 &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5;
+    }
+
+    function isValidApplication(data) {
+      return data.fullName is string && data.fullName.size() > 0 && data.fullName.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() < 20 &&
+             data.location is string && data.location.size() > 0 && data.location.size() < 100 &&
+             data.interestReason is string && data.interestReason.size() > 0 && data.interestReason.size() < 2000 &&
+             data.status in ['Pending', 'Approved', 'Rejected'];
+    }
+
+    function isValidDog(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['Dam', 'Sire'] &&
+             data.weight is string && data.weight.size() > 0 &&
+             data.color is string && data.color.size() > 0 &&
+             data.image is string && data.image.size() > 0;
+    }
+
+    // Rules
+    match /puppies/{puppyId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidPuppy(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /dogs/{dogId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidDog(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /testimonials/{testimonialId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidTestimonial(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email == "chayiadrian890@gmail.com" && request.auth.token.email_verified == true));
+      allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'user';
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /applications/{appId} {
+      allow read: if isAdmin();
+      allow create: if isValidApplication(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+  }
+}

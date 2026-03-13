@@ -336,6 +336,72 @@ const ConfirmDialog = ({
   );
 };
 
+const ApplicationModal = ({ 
+  application, 
+  onClose 
+}: { 
+  application: Application | null, 
+  onClose: () => void 
+}) => {
+  if (!application) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-[32px] p-8 max-w-2xl w-full shadow-2xl border border-stone-100 max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h3 className="text-3xl font-serif font-bold text-stone-900 mb-2">{application.fullName}</h3>
+            <p className="text-stone-500">{application.email} • {application.phone}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+            <X className="h-6 w-6 text-stone-400" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-6">
+            <div>
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Location</h4>
+              <p className="text-stone-900 font-medium">{application.location}</p>
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Other Pets</h4>
+              <p className="text-stone-900 font-medium">{application.otherPets || 'None'}</p>
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Children</h4>
+              <p className="text-stone-900 font-medium">{application.children || 'None'}</p>
+            </div>
+          </div>
+          <div className="space-y-6">
+            <div>
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Preferences</h4>
+              <p className="text-stone-900 font-medium">{application.preferredGender} • {application.preferredSize}</p>
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Reason for Interest</h4>
+              <p className="text-stone-900 font-medium leading-relaxed">{application.interestReason}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 pt-8 border-t border-stone-100 flex justify-end">
+          <button 
+            onClick={onClose}
+            className="bg-stone-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-stone-800 transition-all"
+          >
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }: { puppies: Puppy[], dogs: Dog[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[] }) => {
   const [activeTab, setActiveTab] = useState<'puppies' | 'dogs' | 'testimonials' | 'settings' | 'applications'>('puppies');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -371,6 +437,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     type: 'puppy' | 'dog' | 'testimonial' | 'application';
     title: string;
   }>({ show: false, id: '', type: 'puppy', title: '' });
+  const [viewingApplication, setViewingApplication] = useState<Application | null>(null);
 
   useEffect(() => {
     setSiteSettings(settings);
@@ -582,6 +649,10 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <ApplicationModal 
+        application={viewingApplication} 
+        onClose={() => setViewingApplication(null)} 
+      />
       <ConfirmDialog 
         isOpen={deleteConfirm.show}
         onClose={() => setDeleteConfirm({ ...deleteConfirm, show: false })}
@@ -1186,6 +1257,12 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                   <p className="text-stone-500 text-sm">{app.email} • {app.phone} • {app.location}</p>
                 </div>
                 <div className="flex gap-2">
+                  <button 
+                    onClick={() => setViewingApplication(app)}
+                    className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-stone-800 transition-all"
+                  >
+                    View
+                  </button>
                   {app.status !== 'Approved' && (
                     <button 
                       onClick={() => handleUpdateAppStatus(app.id, 'Approved')}

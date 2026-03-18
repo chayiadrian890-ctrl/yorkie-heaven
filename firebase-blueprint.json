@@ -56,7 +56,10 @@
         "aboutImage": { "type": "string", "description": "URL for the primary about section image" },
         "aboutImage2": { "type": "string", "description": "URL for the secondary about section image" },
         "instagram": { "type": "string" },
-        "facebook": { "type": "string" }
+        "facebook": { "type": "string" },
+        "geneticHealthTesting": { "type": "string" },
+        "vetChecks": { "type": "string" },
+        "returnPolicy": { "type": "string" }
       }
     },
     "Dog": {

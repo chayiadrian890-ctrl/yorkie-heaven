@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, Component } from 'react';
 import { 
   Heart, 
   Dog, 
@@ -23,7 +23,10 @@ import {
   Loader2,
   LogOut,
   LogIn,
-  Sparkles
+  Sparkles,
+  Upload,
+  Clock,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -44,6 +47,120 @@ import {
   orderBy, 
   serverTimestamp 
 } from './firebase';
+
+// --- Error Handling ---
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+  props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "Something went wrong.";
+      try {
+        const parsed = JSON.parse(this.state.error?.message || "");
+        if (parsed.error && parsed.operationType) {
+          errorMessage = `Database Error: ${parsed.error} during ${parsed.operationType} on ${parsed.path || 'unknown path'}`;
+        }
+      } catch (e) {
+        errorMessage = this.state.error?.message || errorMessage;
+      }
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4">
+          <div className="bg-white p-8 rounded-[40px] shadow-xl max-w-md w-full text-center border border-stone-100">
+            <div className="bg-red-50 w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-6">
+              <X className="h-8 w-8 text-red-600" />
+            </div>
+            <h2 className="text-2xl font-serif font-bold text-stone-900 mb-4">Oops!</h2>
+            <p className="text-stone-600 mb-8">{errorMessage}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-brand-primary text-white py-4 rounded-full font-bold hover:bg-brand-primary/90 transition-all shadow-md"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // --- Types ---
 
@@ -93,6 +210,9 @@ interface SiteSettings {
   aboutImage2: string;
   instagram: string;
   facebook: string;
+  geneticHealthTesting: string;
+  vetChecks: string;
+  returnPolicy: string;
 }
 
 interface Application {
@@ -122,13 +242,17 @@ const DEFAULT_SETTINGS: SiteSettings = {
   aboutImage: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=800',
   aboutImage2: 'https://images.unsplash.com/photo-1512546148165-e44e731426df?auto=format&fit=crop&q=80&w=800',
   instagram: '#',
-  facebook: '#'
+  facebook: '#',
+  geneticHealthTesting: 'All our breeding dogs undergo extensive genetic testing for common Yorkshire Terrier health issues including Patellar Luxation, Legg-Calve-Perthes Disease, and Progressive Retinal Atrophy (PRA).',
+  vetChecks: 'Every puppy receives a comprehensive wellness exam from our licensed veterinarian at 6, 9, and 12 weeks of age. They come with a full health record and up-to-date vaccinations.',
+  returnPolicy: 'We offer a 2-year genetic health guarantee. If a life-threatening genetic condition is discovered, we provide a replacement puppy or a full refund. We also have a lifetime return policy—if you can ever no longer care for your dog, they must return to us.'
 };
 
 // --- Components ---
 
 const Navbar = ({ currentPage, setPage, user, isAdmin, settings }: { currentPage: Page, setPage: (p: Page) => void, user: any, isAdmin: boolean, settings: SiteSettings }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const navItems: { label: string, value: Page }[] = [
     { label: 'Home', value: 'home' },
@@ -140,10 +264,21 @@ const Navbar = ({ currentPage, setPage, user, isAdmin, settings }: { currentPage
   ];
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
+      if (error.code === 'auth/popup-blocked') {
+        alert("The login popup was blocked by your browser. Please allow popups for this site and try again.");
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // This is usually fine, just means another request was started or it was closed
+      } else {
+        alert("Login failed: " + (error.message || "Unknown error"));
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -187,8 +322,12 @@ const Navbar = ({ currentPage, setPage, user, isAdmin, settings }: { currentPage
                 </button>
               </div>
             ) : (
-              <button onClick={handleLogin} className="text-stone-600 hover:text-brand-primary transition-colors flex items-center">
-                <LogIn className="h-5 w-5 mr-2" /> Admin
+              <button 
+                onClick={handleLogin} 
+                disabled={isLoggingIn}
+                className="text-stone-600 hover:text-brand-primary transition-colors flex items-center disabled:opacity-50"
+              >
+                {isLoggingIn ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <LogIn className="h-5 w-5 mr-2" />} Admin
               </button>
             )}
 
@@ -336,6 +475,35 @@ const ConfirmDialog = ({
   );
 };
 
+const StatusBadge = ({ status }: { status: 'Approved' | 'Rejected' | 'Pending' }) => {
+  const config = {
+    Approved: {
+      color: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+      icon: <CheckCircle2 className="h-3 w-3" />,
+      label: 'Approved'
+    },
+    Rejected: {
+      color: 'bg-rose-50 text-rose-700 border-rose-100',
+      icon: <XCircle className="h-3 w-3" />,
+      label: 'Rejected'
+    },
+    Pending: {
+      color: 'bg-amber-50 text-amber-700 border-amber-100',
+      icon: <Clock className="h-3 w-3" />,
+      label: 'Pending'
+    }
+  };
+
+  const { color, icon, label } = config[status];
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${color}`}>
+      {icon}
+      {label}
+    </span>
+  );
+};
+
 const ApplicationModal = ({ 
   application, 
   onClose 
@@ -354,7 +522,10 @@ const ApplicationModal = ({
       >
         <div className="flex justify-between items-start mb-8">
           <div>
-            <h3 className="text-3xl font-serif font-bold text-stone-900 mb-2">{application.fullName}</h3>
+            <div className="flex items-center gap-3 mb-2">
+              <h3 className="text-3xl font-serif font-bold text-stone-900">{application.fullName}</h3>
+              <StatusBadge status={application.status} />
+            </div>
             <p className="text-stone-500">{application.email} • {application.phone}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
@@ -403,25 +574,23 @@ const ApplicationModal = ({
 };
 
 const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }: { puppies: Puppy[], dogs: Dog[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[] }) => {
-  const [activeTab, setActiveTab] = useState<'puppies' | 'dogs' | 'testimonials' | 'settings' | 'applications'>('puppies');
+  const [activeTab, setActiveTab] = useState<'dogs' | 'testimonials' | 'settings' | 'applications' | 'health'>('dogs');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [editingPuppyId, setEditingPuppyId] = useState<string | null>(null);
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
   const [editingDogId, setEditingDogId] = useState<string | null>(null);
+  const [dogCategory, setDogCategory] = useState<'Puppy' | 'Dam' | 'Sire'>('Puppy');
   const [editingTestimonialId, setEditingTestimonialId] = useState<string | null>(null);
-  const [newPuppy, setNewPuppy] = useState<Partial<Puppy>>({
+  
+  const [newDog, setNewDog] = useState<any>({
     name: '',
     gender: 'Female',
     status: 'Available',
     dob: new Date().toISOString().split('T')[0],
     image: '',
-    description: ''
-  });
-  const [newDog, setNewDog] = useState<Partial<Dog>>({
-    name: '',
+    description: '',
     role: 'Dam',
     weight: '',
-    color: '',
-    image: ''
+    color: ''
   });
   const [newTestimonial, setNewTestimonial] = useState<Partial<Testimonial>>({
     name: '',
@@ -438,16 +607,51 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     title: string;
   }>({ show: false, id: '', type: 'puppy', title: '' });
   const [viewingApplication, setViewingApplication] = useState<Application | null>(null);
+  const [approvalDialog, setApprovalDialog] = useState<{ show: boolean, id: string, email: string, fullName: string, subject: string }>({
+    show: false,
+    id: '',
+    email: '',
+    fullName: '',
+    subject: 'Your Puppy Application has been Approved!'
+  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const testimonialFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setSiteSettings(settings);
   }, [settings]);
 
-  const generatePuppyImage = async () => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Str = reader.result as string;
+      const compressed = await compressImage(base64Str);
+      setNewDog(prev => ({ ...prev, image: compressed }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleTestimonialFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Str = reader.result as string;
+      const compressed = await compressImage(base64Str, 400, 400); // Smaller for testimonials
+      setNewTestimonial(prev => ({ ...prev, image: compressed }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const generateDogImage = async () => {
     setIsGenerating(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const prompt = `A high-quality, professional studio portrait of a cute Yorkshire Terrier puppy${imageGuidance ? `, ${imageGuidance}` : ''}, soft lighting, neutral background, 4k resolution.`;
+      const prompt = `A high-quality, professional studio portrait of a cute Yorkshire Terrier ${dogCategory === 'Puppy' ? 'puppy' : dogCategory === 'Dam' ? 'female adult dog' : 'male adult dog'}${imageGuidance ? `, ${imageGuidance}` : ''}, soft lighting, neutral background, 4k resolution.`;
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
@@ -459,7 +663,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         if (part.inlineData) {
           const rawImageUrl = `data:image/png;base64,${part.inlineData.data}`;
           const compressedImageUrl = await compressImage(rawImageUrl);
-          setNewPuppy(prev => ({ ...prev, image: compressedImageUrl }));
+          setNewDog(prev => ({ ...prev, image: compressedImageUrl }));
           break;
         }
       }
@@ -470,45 +674,97 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     }
   };
 
-  const handleSavePuppy = async (e: React.FormEvent) => {
+  const generatePuppyDescription = async () => {
+    if (!newDog.name) {
+      alert("Please enter a name first.");
+      return;
+    }
+    
+    setIsGeneratingDescription(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Generate a charming, short (2-3 sentences) description for a ${newDog.gender} Yorkie puppy named ${newDog.name} who is currently ${newDog.status}. Focus on their personality and cuteness.`,
+      });
+      
+      if (response.text) {
+        setNewDog(prev => ({ ...prev, description: response.text.trim() }));
+      }
+    } catch (error) {
+      console.error("AI Generation failed", error);
+    } finally {
+      setIsGeneratingDescription(false);
+    }
+  };
+
+  const handleSaveDog = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPuppy.name || !newPuppy.image) return;
+    if (!newDog.name || !newDog.image) return;
+
+    const collectionName = dogCategory === 'Puppy' ? 'puppies' : 'dogs';
 
     try {
-      const finalImage = await compressImage(newPuppy.image!);
-      const puppyData = { ...newPuppy, image: finalImage };
-
-      if (editingPuppyId) {
-        await updateDoc(doc(db, 'puppies', editingPuppyId), {
-          ...puppyData,
-          updatedAt: serverTimestamp()
-        });
-        setEditingPuppyId(null);
+      const finalImage = await compressImage(newDog.image!);
+      const dogData = { ...newDog, image: finalImage };
+      
+      // Clean up data based on category
+      if (dogCategory === 'Puppy') {
+        delete dogData.role;
+        delete dogData.weight;
+        delete dogData.color;
       } else {
-        const puppyRef = doc(collection(db, 'puppies'));
-        await setDoc(puppyRef, {
-          ...puppyData,
-          id: puppyRef.id,
-          createdAt: serverTimestamp()
-        });
+        delete dogData.gender;
+        delete dogData.status;
+        delete dogData.dob;
+        delete dogData.description;
+        dogData.role = dogCategory;
       }
-      setNewPuppy({
+
+      if (editingDogId) {
+        const path = `${collectionName}/${editingDogId}`;
+        try {
+          await updateDoc(doc(db, collectionName, editingDogId), {
+            ...dogData,
+            updatedAt: serverTimestamp()
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, path);
+        }
+        setEditingDogId(null);
+      } else {
+        const dogRef = doc(collection(db, collectionName));
+        try {
+          await setDoc(dogRef, {
+            ...dogData,
+            id: dogRef.id,
+            createdAt: serverTimestamp()
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, collectionName);
+        }
+      }
+      setNewDog({
         name: '',
         gender: 'Female',
         status: 'Available',
         dob: new Date().toISOString().split('T')[0],
         image: '',
-        description: ''
+        description: '',
+        role: 'Dam',
+        weight: '',
+        color: ''
       });
     } catch (error) {
-      console.error("Failed to save puppy", error);
+      console.error("Failed to save dog", error);
     }
   };
 
-  const handleEditPuppy = (puppy: Puppy) => {
-    setEditingPuppyId(puppy.id);
-    setNewPuppy(puppy);
-    setActiveTab('puppies');
+  const handleEditDog = (dog: any, category: 'Puppy' | 'Dam' | 'Sire') => {
+    setEditingDogId(dog.id);
+    setDogCategory(category);
+    setNewDog(dog);
+    setActiveTab('dogs');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -531,55 +787,19 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   const confirmDelete = async () => {
     const { id, type } = deleteConfirm;
     try {
-      if (type === 'puppy') await deleteDoc(doc(db, 'puppies', id));
-      if (type === 'dog') await deleteDoc(doc(db, 'dogs', id));
-      if (type === 'testimonial') await deleteDoc(doc(db, 'testimonials', id));
-      if (type === 'application') await deleteDoc(doc(db, 'applications', id));
+      const path = `${type === 'puppy' ? 'puppies' : type === 'dog' ? 'dogs' : type === 'testimonial' ? 'testimonials' : 'applications'}/${id}`;
+      try {
+        if (type === 'puppy') await deleteDoc(doc(db, 'puppies', id));
+        if (type === 'dog') await deleteDoc(doc(db, 'dogs', id));
+        if (type === 'testimonial') await deleteDoc(doc(db, 'testimonials', id));
+        if (type === 'application') await deleteDoc(doc(db, 'applications', id));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, path);
+      }
       setDeleteConfirm({ ...deleteConfirm, show: false });
     } catch (error) {
       console.error("Delete failed", error);
     }
-  };
-
-  const handleSaveDog = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newDog.name || !newDog.image) return;
-
-    try {
-      const finalImage = await compressImage(newDog.image!);
-      const dogData = { ...newDog, image: finalImage };
-
-      if (editingDogId) {
-        await updateDoc(doc(db, 'dogs', editingDogId), {
-          ...dogData,
-          updatedAt: serverTimestamp()
-        });
-        setEditingDogId(null);
-      } else {
-        const dogRef = doc(collection(db, 'dogs'));
-        await setDoc(dogRef, {
-          ...dogData,
-          id: dogRef.id,
-          createdAt: serverTimestamp()
-        });
-      }
-      setNewDog({
-        name: '',
-        role: 'Dam',
-        weight: '',
-        color: '',
-        image: ''
-      });
-    } catch (error) {
-      console.error("Failed to save dog", error);
-    }
-  };
-
-  const handleEditDog = (dog: Dog) => {
-    setEditingDogId(dog.id);
-    setNewDog(dog);
-    setActiveTab('dogs');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSaveTestimonial = async (e: React.FormEvent) => {
@@ -587,19 +807,29 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     if (!newTestimonial.name || !newTestimonial.text) return;
 
     try {
+      const testimonialData = { ...newTestimonial };
       if (editingTestimonialId) {
-        await updateDoc(doc(db, 'testimonials', editingTestimonialId), {
-          ...newTestimonial,
-          updatedAt: serverTimestamp()
-        });
+        const path = `testimonials/${editingTestimonialId}`;
+        try {
+          await updateDoc(doc(db, 'testimonials', editingTestimonialId), {
+            ...testimonialData,
+            updatedAt: serverTimestamp()
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, path);
+        }
         setEditingTestimonialId(null);
       } else {
         const testimonialRef = doc(collection(db, 'testimonials'));
-        await setDoc(testimonialRef, {
-          ...newTestimonial,
-          id: testimonialRef.id,
-          createdAt: serverTimestamp()
-        });
+        try {
+          await setDoc(testimonialRef, {
+            ...testimonialData,
+            id: testimonialRef.id,
+            createdAt: serverTimestamp()
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, 'testimonials');
+        }
       }
       setNewTestimonial({
         name: '',
@@ -633,17 +863,47 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         aboutImage2: compressedAbout2
       };
 
-      await setDoc(doc(db, 'settings', 'global'), finalSettings);
+      try {
+        await setDoc(doc(db, 'settings', 'global'), finalSettings);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+      }
     } catch (error) {
       console.error("Failed to save settings", error);
     }
   };
 
-  const handleUpdateAppStatus = async (id: string, status: 'Approved' | 'Rejected' | 'Pending') => {
+  const handleUpdateAppStatus = async (id: string, status: 'Approved' | 'Rejected' | 'Pending', customSubject?: string) => {
+    const path = `applications/${id}`;
     try {
       await updateDoc(doc(db, 'applications', id), { status });
+      
+      if (status === 'Approved') {
+        const app = applications.find(a => a.id === id);
+        if (app) {
+          fetch('/api/send-approval-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: app.email,
+              fullName: app.fullName,
+              companyName: settings.companyName,
+              subject: customSubject
+            })
+          })
+          .then(res => res.json())
+          .then(data => {
+            if (data.error) {
+              console.error("Email API error:", data.error);
+            } else {
+              console.log("Email API success:", data.message);
+            }
+          })
+          .catch(err => console.error("Failed to send approval email", err));
+        }
+      }
     } catch (error) {
-      console.error("Failed to update application status", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -660,26 +920,77 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         title={`Delete ${deleteConfirm.type === 'application' ? 'Application' : deleteConfirm.type.charAt(0).toUpperCase() + deleteConfirm.type.slice(1)}?`}
         message={`Are you sure you want to delete "${deleteConfirm.title}"? This action cannot be undone.`}
       />
+      
+      {/* Approval Dialog */}
+      <AnimatePresence>
+        {approvalDialog.show && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-stone-100"
+            >
+              <h3 className="text-2xl font-serif font-bold text-stone-900 mb-4">Approve Application</h3>
+              <p className="text-stone-500 text-sm mb-6 leading-relaxed">
+                You are about to approve <strong>{approvalDialog.fullName}</strong>'s application. 
+                An email will be sent to <strong>{approvalDialog.email}</strong>.
+              </p>
+              
+              <div className="mb-8">
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-2 tracking-widest">
+                  Email Subject Line
+                </label>
+                <input 
+                  type="text"
+                  value={approvalDialog.subject}
+                  onChange={(e) => setApprovalDialog({ ...approvalDialog, subject: e.target.value })}
+                  className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 transition-all"
+                  placeholder="Enter custom subject line..."
+                />
+              </div>
+
+              <div className="flex space-x-3">
+                <button 
+                  onClick={() => setApprovalDialog({ ...approvalDialog, show: false })}
+                  className="flex-1 bg-stone-100 text-stone-600 py-3 rounded-xl font-bold hover:bg-stone-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    handleUpdateAppStatus(approvalDialog.id, 'Approved', approvalDialog.subject);
+                    setApprovalDialog({ ...approvalDialog, show: false });
+                  }}
+                  className="flex-[2] bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition-all shadow-md"
+                >
+                  Approve & Send Email
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <SectionHeading title="Admin Dashboard" subtitle="Manage your puppies and site content." />
       
       <div className="flex space-x-4 mb-8 border-b border-stone-200 overflow-x-auto">
         <button 
-          onClick={() => setActiveTab('puppies')}
-          className={`pb-4 px-4 font-bold whitespace-nowrap transition-all ${activeTab === 'puppies' ? 'text-brand-primary border-b-2 border-brand-primary' : 'text-stone-400'}`}
-        >
-          Manage Puppies
-        </button>
-        <button 
           onClick={() => setActiveTab('dogs')}
           className={`pb-4 px-4 font-bold whitespace-nowrap transition-all ${activeTab === 'dogs' ? 'text-brand-primary border-b-2 border-brand-primary' : 'text-stone-400'}`}
         >
-          Our Dams & Sires
+          Manage Dogs
         </button>
         <button 
           onClick={() => setActiveTab('testimonials')}
           className={`pb-4 px-4 font-bold whitespace-nowrap transition-all ${activeTab === 'testimonials' ? 'text-brand-primary border-b-2 border-brand-primary' : 'text-stone-400'}`}
         >
           Testimonials
+        </button>
+        <button 
+          onClick={() => setActiveTab('health')}
+          className={`pb-4 px-4 font-bold whitespace-nowrap transition-all ${activeTab === 'health' ? 'text-brand-primary border-b-2 border-brand-primary' : 'text-stone-400'}`}
+        >
+          Health Guarantee
         </button>
         <button 
           onClick={() => setActiveTab('settings')}
@@ -699,187 +1010,6 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         </button>
       </div>
 
-      {activeTab === 'puppies' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-          {/* Add/Edit Puppy Form */}
-          <div className="lg:col-span-1">
-            <div className="bg-white p-8 rounded-[32px] shadow-sm border border-stone-100 sticky top-24">
-              <h3 className="text-xl font-serif font-bold mb-6 flex items-center">
-                {editingPuppyId ? <Settings className="h-5 w-5 mr-2 text-brand-primary" /> : <Plus className="h-5 w-5 mr-2 text-brand-primary" />}
-                {editingPuppyId ? 'Edit Puppy' : 'Add New Puppy'}
-              </h3>
-              <form onSubmit={handleSavePuppy} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Name</label>
-                  <input 
-                    required 
-                    type="text" 
-                    value={newPuppy.name}
-                    onChange={e => setNewPuppy({...newPuppy, name: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Gender</label>
-                    <select 
-                      value={newPuppy.gender}
-                      onChange={e => setNewPuppy({...newPuppy, gender: e.target.value as any})}
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
-                    >
-                      <option>Male</option>
-                      <option>Female</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Status</label>
-                    <select 
-                      value={newPuppy.status}
-                      onChange={e => setNewPuppy({...newPuppy, status: e.target.value as any})}
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
-                    >
-                      <option>Available</option>
-                      <option>Reserved</option>
-                      <option>Upcoming</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">DOB</label>
-                  <input 
-                    type="date" 
-                    value={newPuppy.dob}
-                    onChange={e => setNewPuppy({...newPuppy, dob: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center space-x-2 mb-1">
-                    <label className="block text-xs font-bold text-stone-500 uppercase">Puppy Image</label>
-                    <div className="group relative">
-                      <Info className="h-3.5 w-3.5 text-stone-400 cursor-help" />
-                      <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 w-48 p-2 bg-stone-800 text-white text-[10px] rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 shadow-xl">
-                        Recommended: Square aspect ratio (1:1) or 1000x1000px for the best display across the site.
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col space-y-2">
-                    {newPuppy.image ? (
-                      <div className="relative group aspect-square rounded-xl overflow-hidden border border-stone-200">
-                        <img src={newPuppy.image} alt="Preview" className="w-full h-full object-cover" />
-                        <button 
-                          type="button"
-                          onClick={() => setNewPuppy({...newPuppy, image: ''})}
-                          className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
-                        >
-                          <Trash2 className="h-6 w-6" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col space-y-2">
-                        <input 
-                          type="text" 
-                          placeholder="AI Prompt (e.g., 'sitting', 'playing')..."
-                          value={imageGuidance}
-                          onChange={e => setImageGuidance(e.target.value)}
-                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-[10px]" 
-                        />
-                        <button 
-                          type="button"
-                          onClick={generatePuppyImage}
-                          disabled={isGenerating}
-                          className="w-full py-4 border-2 border-dashed border-stone-200 rounded-xl flex flex-col items-center justify-center text-stone-400 hover:border-brand-primary hover:text-brand-primary transition-all"
-                        >
-                          {isGenerating ? (
-                            <Loader2 className="h-8 w-8 animate-spin" />
-                          ) : (
-                            <>
-                              <Sparkles className="h-8 w-8 mb-2" />
-                              <span className="text-xs font-bold">Generate with AI</span>
-                            </>
-                          )}
-                        </button>
-                        <input 
-                          type="text" 
-                          placeholder="Or paste image URL..."
-                          value={newPuppy.image}
-                          onChange={e => setNewPuppy({...newPuppy, image: e.target.value})}
-                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-xs" 
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Description</label>
-                  <textarea 
-                    rows={3} 
-                    value={newPuppy.description}
-                    onChange={e => setNewPuppy({...newPuppy, description: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
-                  ></textarea>
-                </div>
-                <div className="flex space-x-2">
-                  {editingPuppyId && (
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setEditingPuppyId(null);
-                        setNewPuppy({ name: '', gender: 'Female', status: 'Available', dob: new Date().toISOString().split('T')[0], image: '', description: '' });
-                      }}
-                      className="flex-1 bg-stone-200 text-stone-700 py-3 rounded-xl font-bold hover:bg-stone-300 transition-all"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  <button 
-                    type="submit"
-                    className="flex-[2] bg-brand-primary text-white py-3 rounded-xl font-bold hover:bg-brand-primary/90 transition-all shadow-sm"
-                  >
-                    {editingPuppyId ? 'Update Puppy' : 'Save Puppy'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          {/* Puppies List */}
-          <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {puppies.map(puppy => (
-                <div key={puppy.id} className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-4">
-                  <img src={puppy.image} alt={puppy.name} className="h-20 w-20 rounded-2xl object-cover" />
-                  <div className="flex-grow">
-                    <h4 className="font-bold text-stone-900">{puppy.name}</h4>
-                    <p className="text-xs text-stone-500">{puppy.status} • {puppy.gender}</p>
-                  </div>
-                  <div className="flex space-x-1">
-                    <button 
-                      onClick={() => handleEditPuppy(puppy)}
-                      className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
-                    >
-                      <Settings className="h-5 w-5" />
-                    </button>
-                    <button 
-                      onClick={() => handleDeletePuppy(puppy.id, puppy.name)}
-                      className="p-2 text-stone-300 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {puppies.length === 0 && (
-                <div className="col-span-full py-20 text-center text-stone-400">
-                  <Dog className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>No puppies added yet.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {activeTab === 'dogs' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
           {/* Add/Edit Dog Form */}
@@ -887,9 +1017,21 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
             <div className="bg-white p-8 rounded-[32px] shadow-sm border border-stone-100 sticky top-24">
               <h3 className="text-xl font-serif font-bold mb-6 flex items-center">
                 {editingDogId ? <Settings className="h-5 w-5 mr-2 text-brand-primary" /> : <Plus className="h-5 w-5 mr-2 text-brand-primary" />}
-                {editingDogId ? 'Edit Dog' : 'Add New Dam/Sire'}
+                {editingDogId ? 'Edit Dog' : 'Add New Dog'}
               </h3>
               <form onSubmit={handleSaveDog} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Category</label>
+                  <select 
+                    value={dogCategory}
+                    onChange={e => setDogCategory(e.target.value as any)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
+                  >
+                    <option value="Puppy">Puppy</option>
+                    <option value="Dam">Dam</option>
+                    <option value="Sire">Sire</option>
+                  </select>
+                </div>
                 <div>
                   <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Name</label>
                   <input 
@@ -900,55 +1042,189 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                     className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Role</label>
-                    <select 
-                      value={newDog.role}
-                      onChange={e => setNewDog({...newDog, role: e.target.value as any})}
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
-                    >
-                      <option>Dam</option>
-                      <option>Sire</option>
-                    </select>
+                
+                {dogCategory === 'Puppy' ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Gender</label>
+                        <select 
+                          value={newDog.gender}
+                          onChange={e => setNewDog({...newDog, gender: e.target.value as any})}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
+                        >
+                          <option>Male</option>
+                          <option>Female</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Status</label>
+                        <select 
+                          value={newDog.status}
+                          onChange={e => setNewDog({...newDog, status: e.target.value as any})}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
+                        >
+                          <option>Available</option>
+                          <option>Reserved</option>
+                          <option>Upcoming</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">DOB</label>
+                      <input 
+                        type="date" 
+                        value={newDog.dob}
+                        onChange={e => setNewDog({...newDog, dob: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-stone-500 uppercase">Description</label>
+                        <button 
+                          type="button"
+                          onClick={generatePuppyDescription}
+                          disabled={isGeneratingDescription}
+                          className="text-[10px] font-bold text-brand-primary hover:text-brand-accent flex items-center transition-colors disabled:opacity-50"
+                        >
+                          {isGeneratingDescription ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                          AI Generate
+                        </button>
+                      </div>
+                      <textarea 
+                        rows={3} 
+                        value={newDog.description}
+                        onChange={e => setNewDog({...newDog, description: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        placeholder="Tell us about this puppy's personality..."
+                      ></textarea>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Weight</label>
+                        <input 
+                          type="text" 
+                          value={newDog.weight}
+                          onChange={e => setNewDog({...newDog, weight: e.target.value})}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
+                          placeholder="e.g., 5 lbs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Color</label>
+                        <input 
+                          type="text" 
+                          value={newDog.color}
+                          onChange={e => setNewDog({...newDog, color: e.target.value})}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
+                          placeholder="e.g., Blue & Gold"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <div className="flex items-center space-x-2 mb-1">
+                    <label className="block text-xs font-bold text-stone-500 uppercase">Image</label>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Weight</label>
+                  <div className="flex flex-col space-y-2">
+                    {newDog.image ? (
+                      <div className="relative group aspect-square rounded-xl overflow-hidden border border-stone-200">
+                        <img src={newDog.image} alt="Preview" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-4">
+                          <button 
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="p-3 bg-white/20 hover:bg-white/40 rounded-full text-white transition-all"
+                            title="Change Image"
+                          >
+                            <Upload className="h-6 w-6" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => setNewDog({...newDog, image: ''})}
+                            className="p-3 bg-red-500/50 hover:bg-red-500/70 rounded-full text-white transition-all"
+                            title="Remove Image"
+                          >
+                            <Trash2 className="h-6 w-6" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col space-y-2">
+                        <input 
+                          type="text" 
+                          placeholder="AI Prompt (e.g., 'sitting', 'playing')..."
+                          value={imageGuidance}
+                          onChange={e => setImageGuidance(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-[10px]" 
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <button 
+                            type="button"
+                            onClick={generateDogImage}
+                            disabled={isGenerating}
+                            className="py-6 border-2 border-dashed border-stone-200 rounded-xl flex flex-col items-center justify-center text-stone-400 hover:border-brand-primary hover:text-brand-primary transition-all"
+                          >
+                            {isGenerating ? (
+                              <Loader2 className="h-8 w-8 animate-spin" />
+                            ) : (
+                              <>
+                                <Sparkles className="h-6 w-6 mb-2" />
+                                <span className="text-[10px] font-bold">AI Generate</span>
+                              </>
+                            )}
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="py-6 border-2 border-dashed border-stone-200 rounded-xl flex flex-col items-center justify-center text-stone-400 hover:border-brand-primary hover:text-brand-primary transition-all"
+                          >
+                            <Upload className="h-6 w-6 mb-2" />
+                            <span className="text-[10px] font-bold">Upload File</span>
+                          </button>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="Or paste image URL..."
+                          value={newDog.image}
+                          onChange={e => setNewDog({...newDog, image: e.target.value})}
+                          className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-xs" 
+                        />
+                      </div>
+                    )}
                     <input 
-                      type="text" 
-                      value={newDog.weight}
-                      onChange={e => setNewDog({...newDog, weight: e.target.value})}
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                      placeholder="e.g., 5 lbs"
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
+                      accept="image/*"
+                      className="hidden"
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Color</label>
-                  <input 
-                    type="text" 
-                    value={newDog.color}
-                    onChange={e => setNewDog({...newDog, color: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                    placeholder="e.g., Blue & Gold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Dog Image URL</label>
-                  <input 
-                    type="text" 
-                    value={newDog.image}
-                    onChange={e => setNewDog({...newDog, image: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                  />
-                </div>
+
                 <div className="flex space-x-2">
                   {editingDogId && (
                     <button 
                       type="button"
                       onClick={() => {
                         setEditingDogId(null);
-                        setNewDog({ name: '', role: 'Dam', weight: '', color: '', image: '' });
+                        setNewDog({
+                          name: '',
+                          gender: 'Female',
+                          status: 'Available',
+                          dob: new Date().toISOString().split('T')[0],
+                          image: '',
+                          description: '',
+                          role: 'Dam',
+                          weight: '',
+                          color: ''
+                        });
                       }}
                       className="flex-1 bg-stone-200 text-stone-700 py-3 rounded-xl font-bold hover:bg-stone-300 transition-all"
                     >
@@ -968,38 +1244,116 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
 
           {/* Dogs List */}
           <div className="lg:col-span-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {dogs.map(dog => (
-                <div key={dog.id} className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-4">
-                  <img src={dog.image} alt={dog.name} className="h-20 w-20 rounded-2xl object-cover" />
-                  <div className="flex-grow">
-                    <h4 className="font-bold text-stone-900">{dog.name}</h4>
-                    <p className="text-xs text-stone-500">{dog.role} • {dog.weight}</p>
-                  </div>
-                  <div className="flex space-x-1">
-                    <button 
-                      onClick={() => handleEditDog(dog)}
-                      className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
-                    >
-                      <Settings className="h-5 w-5" />
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteDog(dog.id, dog.name)}
-                      className="p-2 text-stone-300 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                  </div>
+            <div className="space-y-8">
+              {/* Puppies Section */}
+              <div>
+                <h4 className="text-sm font-bold text-stone-400 uppercase tracking-widest mb-4">Puppies</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {puppies.map(puppy => (
+                    <div key={puppy.id} className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-4">
+                      <img src={puppy.image} alt={puppy.name} className="h-20 w-20 rounded-2xl object-cover" />
+                      <div className="flex-grow">
+                        <h4 className="font-bold text-stone-900">{puppy.name}</h4>
+                        <p className="text-xs text-stone-500">{puppy.status} • {puppy.gender}</p>
+                      </div>
+                      <div className="flex space-x-1">
+                        <button 
+                          onClick={() => handleEditDog(puppy, 'Puppy')}
+                          className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
+                        >
+                          <Settings className="h-5 w-5" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeletePuppy(puppy.id, puppy.name)}
+                          className="p-2 text-stone-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {puppies.length === 0 && <p className="text-stone-400 text-sm italic">No puppies added.</p>}
                 </div>
-              ))}
-              {dogs.length === 0 && (
-                <div className="col-span-full py-20 text-center text-stone-400">
-                  <Dog className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>No dams or sires added yet.</p>
+              </div>
+
+              {/* Adults Section */}
+              <div>
+                <h4 className="text-sm font-bold text-stone-400 uppercase tracking-widest mb-4">Dams & Sires</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {dogs.map(dog => (
+                    <div key={dog.id} className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-4">
+                      <img src={dog.image} alt={dog.name} className="h-20 w-20 rounded-2xl object-cover" />
+                      <div className="flex-grow">
+                        <h4 className="font-bold text-stone-900">{dog.name}</h4>
+                        <p className="text-xs text-stone-500">{dog.role} • {dog.weight}</p>
+                      </div>
+                      <div className="flex space-x-1">
+                        <button 
+                          onClick={() => handleEditDog(dog, dog.role as any)}
+                          className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
+                        >
+                          <Settings className="h-5 w-5" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteDog(dog.id, dog.name)}
+                          className="p-2 text-stone-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {dogs.length === 0 && <p className="text-stone-400 text-sm italic">No dams or sires added.</p>}
                 </div>
-              )}
+              </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'health' && (
+        <div className="max-w-3xl mx-auto bg-white p-8 rounded-[40px] shadow-sm border border-stone-100">
+          <h3 className="text-2xl font-serif font-bold mb-8 flex items-center">
+            <Heart className="h-6 w-6 mr-2 text-brand-primary" /> Health Guarantee & Policies
+          </h3>
+          <form onSubmit={handleSaveSettings} className="space-y-6">
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Genetic Health Testing</label>
+              <textarea 
+                rows={4}
+                value={siteSettings.geneticHealthTesting}
+                onChange={e => setSiteSettings({...siteSettings, geneticHealthTesting: e.target.value})}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
+                placeholder="Describe your genetic testing protocols..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Vet Checks & Vaccinations</label>
+              <textarea 
+                rows={4}
+                value={siteSettings.vetChecks}
+                onChange={e => setSiteSettings({...siteSettings, vetChecks: e.target.value})}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
+                placeholder="Describe your veterinary care and vaccination schedule..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Return Policy & Health Guarantee</label>
+              <textarea 
+                rows={4}
+                value={siteSettings.returnPolicy}
+                onChange={e => setSiteSettings({...siteSettings, returnPolicy: e.target.value})}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
+                placeholder="Detail your health guarantee and lifetime return policy..."
+              />
+            </div>
+            <button 
+              type="submit"
+              className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold hover:bg-brand-primary/90 transition-all shadow-md"
+            >
+              Save Health Policies
+            </button>
+          </form>
         </div>
       )}
 
@@ -1161,13 +1515,55 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Image URL</label>
-                  <input 
-                    type="text" 
-                    value={newTestimonial.image}
-                    onChange={e => setNewTestimonial({...newTestimonial, image: e.target.value})}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
-                  />
+                  <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Image</label>
+                  <div className="flex flex-col space-y-2">
+                    {newTestimonial.image ? (
+                      <div className="relative group w-24 h-24 rounded-2xl overflow-hidden border border-stone-200">
+                        <img src={newTestimonial.image} alt="Preview" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
+                          <button 
+                            type="button"
+                            onClick={() => testimonialFileInputRef.current?.click()}
+                            className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white transition-all"
+                            title="Change Image"
+                          >
+                            <Upload className="h-4 w-4" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => setNewTestimonial({...newTestimonial, image: ''})}
+                            className="p-1.5 bg-red-500/50 hover:bg-red-500/70 rounded-full text-white transition-all"
+                            title="Remove Image"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button 
+                        type="button"
+                        onClick={() => testimonialFileInputRef.current?.click()}
+                        className="w-24 h-24 border-2 border-dashed border-stone-200 rounded-2xl flex flex-col items-center justify-center text-stone-400 hover:border-brand-primary hover:text-brand-primary transition-all"
+                      >
+                        <Upload className="h-5 w-5 mb-1" />
+                        <span className="text-[10px] font-bold text-center">Upload Photo</span>
+                      </button>
+                    )}
+                    <input 
+                      type="text" 
+                      placeholder="Or paste image URL..."
+                      value={newTestimonial.image}
+                      onChange={e => setNewTestimonial({...newTestimonial, image: e.target.value})}
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-xs" 
+                    />
+                    <input 
+                      type="file" 
+                      ref={testimonialFileInputRef}
+                      onChange={handleTestimonialFileUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Testimonial Text</label>
@@ -1204,33 +1600,33 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
           </div>
 
           <div className="lg:col-span-2">
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {testimonials.map(t => (
-                <div key={t.id} className="bg-white p-6 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-6">
-                  <img src={t.image} alt={t.name} className="h-16 w-16 rounded-full object-cover" />
+                <div key={t.id} className="bg-white p-4 rounded-3xl border border-stone-100 shadow-sm flex items-center space-x-4">
+                  <img src={t.image} alt={t.name} className="h-20 w-20 rounded-2xl object-cover" />
                   <div className="flex-grow">
                     <h4 className="font-bold text-stone-900">{t.name}</h4>
-                    <p className="text-xs text-stone-500 mb-2">{t.location}</p>
-                    <p className="text-sm text-stone-600 line-clamp-2 italic">"{t.text}"</p>
+                    <p className="text-[10px] text-stone-500 mb-1">{t.location}</p>
+                    <p className="text-[11px] text-stone-600 line-clamp-2 italic">"{t.text}"</p>
                   </div>
-                  <div className="flex space-x-1">
+                  <div className="flex flex-col space-y-1">
                     <button 
                       onClick={() => handleEditTestimonial(t)}
                       className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
                     >
-                      <Settings className="h-5 w-5" />
+                      <Settings className="h-4 w-4" />
                     </button>
                     <button 
                       onClick={() => handleDeleteTestimonial(t.id, t.name)}
                       className="p-2 text-stone-300 hover:text-red-500 transition-colors"
                     >
-                      <Trash2 className="h-5 w-5" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
               ))}
               {testimonials.length === 0 && (
-                <div className="py-20 text-center text-stone-400">
+                <div className="col-span-full py-20 text-center text-stone-400">
                   <p>No testimonials added yet.</p>
                 </div>
               )}
@@ -1246,13 +1642,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                 <div>
                   <div className="flex items-center gap-3 mb-1">
                     <h3 className="text-xl font-serif font-bold text-stone-900">{app.fullName}</h3>
-                    <span className={`text-[10px] font-bold uppercase px-3 py-1 rounded-full ${
-                      app.status === 'Approved' ? 'bg-green-100 text-green-700' : 
-                      app.status === 'Rejected' ? 'bg-red-100 text-red-700' : 
-                      'bg-stone-100 text-stone-600'
-                    }`}>
-                      {app.status}
-                    </span>
+                    <StatusBadge status={app.status} />
                   </div>
                   <p className="text-stone-500 text-sm">{app.email} • {app.phone} • {app.location}</p>
                 </div>
@@ -1265,7 +1655,13 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                   </button>
                   {app.status !== 'Approved' && (
                     <button 
-                      onClick={() => handleUpdateAppStatus(app.id, 'Approved')}
+                      onClick={() => setApprovalDialog({
+                        show: true,
+                        id: app.id,
+                        email: app.email,
+                        fullName: app.fullName,
+                        subject: 'Your Puppy Application has been Approved!'
+                      })}
                       className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-green-700 transition-all"
                     >
                       Approve
@@ -1363,7 +1759,7 @@ const HomePage = ({ setPage, puppies, testimonials, settings }: { setPage: (p: P
             onClick={() => setPage('our-dogs')}
             className="inline-flex items-center text-brand-primary font-bold hover:text-brand-accent transition-colors"
           >
-            View All Litters <ChevronRight className="ml-1 h-5 w-5" />
+            See More <ChevronRight className="ml-1 h-5 w-5" />
           </button>
         </div>
       </div>
@@ -1636,10 +2032,10 @@ const AboutPage = ({ settings }: { settings: SiteSettings }) => (
 
 const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Dog[], puppies: Puppy[], setPage: (p: Page) => void }) => (
   <div className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <SectionHeading title="Available Puppies" subtitle="Our current litters and upcoming arrivals. Hand-raised with love." />
+    <SectionHeading title="Available Puppies" subtitle="All our current puppies, including available and reserved ones. Hand-raised with love." />
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
       {puppies.map(puppy => <PuppyCard key={puppy.id} puppy={puppy} setPage={setPage} />)}
-      {puppies.length === 0 && <p className="col-span-full text-center text-stone-400 py-10">No puppies currently available. Check back soon!</p>}
+      {puppies.length === 0 && <p className="col-span-full text-center text-stone-400 py-10">No puppies currently listed. Check back soon!</p>}
     </div>
 
     <SectionHeading title="Our Dams & Sires" subtitle="The foundation of our program. Each of our adult dogs is a beloved family pet first." />
@@ -1671,10 +2067,10 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Dog[], puppies: Puppy[]
   </div>
 );
 
-const ProcessPage = () => (
+const ProcessPage = ({ settings }: { settings: SiteSettings }) => (
   <section className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <SectionHeading title="Our Adoption Process" subtitle="We want to ensure every puppy goes to a home where they will be cherished." />
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto mb-24">
       {[
         { step: '01', title: 'Submit Application', desc: 'Fill out our detailed application form to tell us about your home and lifestyle.' },
         { step: '02', title: 'Phone Interview', desc: 'We\'ll schedule a call to discuss your application and answer any questions you have.' },
@@ -1692,6 +2088,39 @@ const ProcessPage = () => (
           </div>
         </div>
       ))}
+    </div>
+
+    <div className="bg-brand-secondary rounded-[48px] p-8 md:p-16 border border-stone-100">
+      <div className="text-center mb-16">
+        <h3 className="text-3xl md:text-4xl font-serif font-bold text-stone-900 mb-4">Health Guarantee & Policies</h3>
+        <p className="text-stone-600 max-w-2xl mx-auto">We take the health of our puppies seriously. Here is what you can expect when you adopt from us.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+          <div className="w-12 h-12 bg-brand-accent/20 rounded-2xl flex items-center justify-center mb-6">
+            <Sparkles className="h-6 w-6 text-brand-primary" />
+          </div>
+          <h4 className="text-xl font-serif font-bold text-stone-900 mb-4">Genetic Testing</h4>
+          <p className="text-stone-600 text-sm leading-relaxed">{settings.geneticHealthTesting}</p>
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+          <div className="w-12 h-12 bg-brand-accent/20 rounded-2xl flex items-center justify-center mb-6">
+            <CheckCircle2 className="h-6 w-6 text-brand-primary" />
+          </div>
+          <h4 className="text-xl font-serif font-bold text-stone-900 mb-4">Vet Checks</h4>
+          <p className="text-stone-600 text-sm leading-relaxed">{settings.vetChecks}</p>
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+          <div className="w-12 h-12 bg-brand-accent/20 rounded-2xl flex items-center justify-center mb-6">
+            <Heart className="h-6 w-6 text-brand-primary" />
+          </div>
+          <h4 className="text-xl font-serif font-bold text-stone-900 mb-4">Return Policy</h4>
+          <p className="text-stone-600 text-sm leading-relaxed">{settings.returnPolicy}</p>
+        </div>
+      </div>
     </div>
   </section>
 );
@@ -1814,12 +2243,16 @@ const ApplicationPage = () => {
     setIsSubmitting(true);
     try {
       const appRef = doc(collection(db, 'applications'));
-      await setDoc(appRef, {
-        ...formData,
-        id: appRef.id,
-        status: 'Pending',
-        createdAt: serverTimestamp()
-      });
+      try {
+        await setDoc(appRef, {
+          ...formData,
+          id: appRef.id,
+          status: 'Pending',
+          createdAt: serverTimestamp()
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'applications');
+      }
       setSubmitted(true);
     } catch (error) {
       console.error("Application submission failed", error);
@@ -1987,6 +2420,14 @@ const ApplicationPage = () => {
 // --- Main App ---
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
   const [page, setPage] = useState<Page>('home');
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -2013,35 +2454,13 @@ export default function App() {
 
   // Data Listeners
   useEffect(() => {
-    const handleFirestoreError = (error: any, operationType: string, path: string | null) => {
-      const errInfo = {
-        error: error instanceof Error ? error.message : String(error),
-        authInfo: {
-          userId: auth.currentUser?.uid,
-          email: auth.currentUser?.email,
-          emailVerified: auth.currentUser?.emailVerified,
-          isAnonymous: auth.currentUser?.isAnonymous,
-          tenantId: auth.currentUser?.tenantId,
-          providerInfo: auth.currentUser?.providerData.map(provider => ({
-            providerId: provider.providerId,
-            displayName: provider.displayName,
-            email: provider.email,
-            photoUrl: provider.photoURL
-          })) || []
-        },
-        operationType,
-        path
-      };
-      console.error(`Firestore Error (${operationType} on ${path}):`, JSON.stringify(errInfo));
-    };
-
     const qPuppies = query(collection(db, 'puppies'), orderBy('createdAt', 'desc'));
     const unsubPuppies = onSnapshot(qPuppies, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Puppy));
       setPuppies(data);
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, 'list', 'puppies');
+      handleFirestoreError(error, OperationType.LIST, 'puppies');
       setLoading(false);
     });
 
@@ -2050,7 +2469,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Dog));
       setDogs(data);
     }, (error) => {
-      handleFirestoreError(error, 'list', 'dogs');
+      handleFirestoreError(error, OperationType.LIST, 'dogs');
     });
 
     const qTestimonials = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
@@ -2058,7 +2477,7 @@ export default function App() {
       const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Testimonial));
       setTestimonials(data);
     }, (error) => {
-      handleFirestoreError(error, 'list', 'testimonials');
+      handleFirestoreError(error, OperationType.LIST, 'testimonials');
     });
 
     let unsubApplications = () => {};
@@ -2068,7 +2487,7 @@ export default function App() {
         const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Application));
         setApplications(data);
       }, (error) => {
-        handleFirestoreError(error, 'list', 'applications');
+        handleFirestoreError(error, OperationType.LIST, 'applications');
       });
     }
 
@@ -2077,7 +2496,7 @@ export default function App() {
         setSettings(snapshot.data() as SiteSettings);
       }
     }, (error) => {
-      handleFirestoreError(error, 'get', 'settings/global');
+      handleFirestoreError(error, OperationType.GET, 'settings/global');
     });
 
     return () => {
@@ -2107,7 +2526,7 @@ export default function App() {
       case 'home': return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} />;
       case 'about': return <AboutPage settings={settings} />;
       case 'our-dogs': return <OurDogsPage dogs={dogs} puppies={puppies} setPage={setPage} />;
-      case 'process': return <ProcessPage />;
+      case 'process': return <ProcessPage settings={settings} />;
       case 'faq': return <FAQPage />;
       case 'contact': return <ContactPage settings={settings} />;
       case 'apply': return <ApplicationPage />;

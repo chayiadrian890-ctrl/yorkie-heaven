@@ -5,8 +5,8 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     //
-    // Collection: puppies
-    // Fields: name, gender, dob, status, image, description, createdAt
+    // Collection: animals
+    // Fields: name, category, image, description, status, gender, dob, weight, color, role, createdAt
     //
     // Collection: testimonials
     // Fields: name, location, text, image, rating, createdAt
@@ -23,15 +23,19 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "chayiadrian890@gmail.com" && request.auth.token.email_verified == true);
+        (request.auth.token.email == "chayiadrian890@gmail.com");
     }
 
-    function isValidPuppy(data) {
+    function isValidAnimal(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.gender in ['Male', 'Female'] &&
-             data.status in ['Available', 'Reserved', 'Upcoming'] &&
+             data.category in ['puppy', 'dam', 'sire'] &&
              data.image is string && data.image.size() > 0 &&
-             data.description is string && data.description.size() < 1000;
+             data.description is string && data.description.size() < 2000 &&
+             // Conditional validation based on category
+             (data.category == 'puppy' ? 
+               (data.status in ['available', 'reserved', 'upcoming'] && data.gender in ['Male', 'Female']) : 
+               (data.role is string && data.weight is string && data.color is string)
+             );
     }
 
     function isValidTestimonial(data) {
@@ -49,24 +53,10 @@ service cloud.firestore {
              data.status in ['Pending', 'Approved', 'Rejected'];
     }
 
-    function isValidDog(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.role in ['Dam', 'Sire'] &&
-             data.weight is string && data.weight.size() > 0 &&
-             data.color is string && data.color.size() > 0 &&
-             data.image is string && data.image.size() > 0;
-    }
-
     // Rules
-    match /puppies/{puppyId} {
+    match /animals/{animalId} {
       allow read: if true;
-      allow create, update: if isAdmin() && isValidPuppy(request.resource.data);
-      allow delete: if isAdmin();
-    }
-
-    match /dogs/{dogId} {
-      allow read: if true;
-      allow create, update: if isAdmin() && isValidDog(request.resource.data);
+      allow create, update: if isAdmin() && isValidAnimal(request.resource.data);
       allow delete: if isAdmin();
     }
 

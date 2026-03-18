@@ -166,24 +166,18 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 type Page = 'home' | 'about' | 'our-dogs' | 'process' | 'faq' | 'contact' | 'apply' | 'admin';
 
-interface Puppy {
+interface Animal {
   id: string;
   name: string;
-  gender: 'Male' | 'Female';
-  dob: string;
-  status: 'Available' | 'Reserved' | 'Upcoming';
+  category: 'puppy' | 'dam' | 'sire';
   image: string;
   description: string;
-  createdAt?: any;
-}
-
-interface Dog {
-  id: string;
-  name: string;
-  role: 'Dam' | 'Sire';
-  weight: string;
-  color: string;
-  image: string;
+  status?: 'available' | 'reserved'; // Only for puppies
+  gender?: 'Male' | 'Female';
+  dob?: string;
+  weight?: string;
+  color?: string;
+  role?: string;
   createdAt?: any;
 }
 
@@ -573,7 +567,7 @@ const ApplicationModal = ({
   );
 };
 
-const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }: { puppies: Puppy[], dogs: Dog[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[] }) => {
+const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }: { puppies: Animal[], dogs: Animal[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[] }) => {
   const [activeTab, setActiveTab] = useState<'dogs' | 'testimonials' | 'settings' | 'applications' | 'health'>('dogs');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
@@ -584,7 +578,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   const [newDog, setNewDog] = useState<any>({
     name: '',
     gender: 'Female',
-    status: 'Available',
+    status: 'available',
     dob: new Date().toISOString().split('T')[0],
     image: '',
     description: '',
@@ -702,11 +696,16 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     e.preventDefault();
     if (!newDog.name || !newDog.image) return;
 
-    const collectionName = dogCategory === 'Puppy' ? 'puppies' : 'dogs';
+    const collectionName = 'animals';
 
     try {
       const finalImage = await compressImage(newDog.image!);
-      const dogData = { ...newDog, image: finalImage };
+      const dogData = { 
+        ...newDog, 
+        image: finalImage,
+        category: dogCategory.toLowerCase() as 'puppy' | 'dam' | 'sire',
+        status: newDog.status?.toLowerCase() as 'available' | 'reserved'
+      };
       
       // Clean up data based on category
       if (dogCategory === 'Puppy') {
@@ -760,9 +759,14 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     }
   };
 
-  const handleEditDog = (dog: any, category: 'Puppy' | 'Dam' | 'Sire') => {
+  const handleEditDog = (dog: Animal) => {
     setEditingDogId(dog.id);
-    setDogCategory(category);
+    const categoryMap: Record<string, 'Puppy' | 'Dam' | 'Sire'> = {
+      'puppy': 'Puppy',
+      'dam': 'Dam',
+      'sire': 'Sire'
+    };
+    setDogCategory(categoryMap[dog.category]);
     setNewDog(dog);
     setActiveTab('dogs');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -787,12 +791,11 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   const confirmDelete = async () => {
     const { id, type } = deleteConfirm;
     try {
-      const path = `${type === 'puppy' ? 'puppies' : type === 'dog' ? 'dogs' : type === 'testimonial' ? 'testimonials' : 'applications'}/${id}`;
+      const collectionName = (type === 'puppy' || type === 'dog') ? 'animals' : 
+                            (type === 'testimonial' ? 'testimonials' : 'applications');
+      const path = `${collectionName}/${id}`;
       try {
-        if (type === 'puppy') await deleteDoc(doc(db, 'puppies', id));
-        if (type === 'dog') await deleteDoc(doc(db, 'dogs', id));
-        if (type === 'testimonial') await deleteDoc(doc(db, 'testimonials', id));
-        if (type === 'application') await deleteDoc(doc(db, 'applications', id));
+        await deleteDoc(doc(db, collectionName, id));
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, path);
       }
@@ -1064,9 +1067,9 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                           onChange={e => setNewDog({...newDog, status: e.target.value as any})}
                           className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2"
                         >
-                          <option>Available</option>
-                          <option>Reserved</option>
-                          <option>Upcoming</option>
+                          <option value="available">Available</option>
+                          <option value="reserved">Reserved</option>
+                          <option value="upcoming">Upcoming</option>
                         </select>
                       </div>
                     </div>
@@ -1258,7 +1261,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       </div>
                       <div className="flex space-x-1">
                         <button 
-                          onClick={() => handleEditDog(puppy, 'Puppy')}
+                          onClick={() => handleEditDog(puppy)}
                           className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
                         >
                           <Settings className="h-5 w-5" />
@@ -1289,7 +1292,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       </div>
                       <div className="flex space-x-1">
                         <button 
-                          onClick={() => handleEditDog(dog, dog.role as any)}
+                          onClick={() => handleEditDog(dog)}
                           className="p-2 text-stone-300 hover:text-brand-primary transition-colors"
                         >
                           <Settings className="h-5 w-5" />
@@ -1733,7 +1736,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
 
 // --- Page Views ---
 
-const HomePage = ({ setPage, puppies, testimonials, settings, settingsLoading }: { setPage: (p: Page) => void, puppies: Puppy[], testimonials: Testimonial[], settings: SiteSettings, settingsLoading: boolean }) => (
+const HomePage = ({ setPage, puppies, testimonials, settings, settingsLoading }: { setPage: (p: Page) => void, puppies: Animal[], testimonials: Testimonial[], settings: SiteSettings, settingsLoading: boolean }) => (
   <div>
     <Hero setPage={setPage} settings={settings} settingsLoading={settingsLoading} />
     
@@ -1915,7 +1918,7 @@ const SectionHeading = ({ title, subtitle, centered = true }: { title: string, s
   </div>
 );
 
-const PuppyCard: React.FC<{ puppy: Puppy, setPage: (p: Page) => void }> = ({ puppy, setPage }) => (
+const PuppyCard: React.FC<{ puppy: Animal, setPage: (p: Page) => void }> = ({ puppy, setPage }) => (
   <motion.div 
     whileHover={{ y: -10 }}
     className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100 flex flex-col h-full"
@@ -1927,7 +1930,9 @@ const PuppyCard: React.FC<{ puppy: Puppy, setPage: (p: Page) => void }> = ({ pup
         className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
         referrerPolicy="no-referrer"
       />
-      <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold text-brand-primary uppercase tracking-wider">
+      <div className={`absolute top-4 right-4 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+        puppy.status === 'available' ? 'bg-green-500/90 text-white' : 'bg-stone-500/90 text-white'
+      }`}>
         {puppy.status}
       </div>
     </div>
@@ -1937,12 +1942,21 @@ const PuppyCard: React.FC<{ puppy: Puppy, setPage: (p: Page) => void }> = ({ pup
         <span className="text-sm text-stone-500">{puppy.gender}</span>
       </div>
       <p className="text-stone-600 text-sm mb-6 flex-grow">{puppy.description}</p>
-      <button 
-        onClick={() => setPage('apply')}
-        className="w-full py-3 border border-brand-primary text-brand-primary rounded-full font-medium hover:bg-brand-primary hover:text-white transition-all"
-      >
-        Apply for {puppy.name}
-      </button>
+      {puppy.status === 'available' ? (
+        <button 
+          onClick={() => setPage('apply')}
+          className="w-full py-3 border border-brand-primary text-brand-primary rounded-full font-medium hover:bg-brand-primary hover:text-white transition-all"
+        >
+          Apply for {puppy.name}
+        </button>
+      ) : (
+        <button 
+          disabled
+          className="w-full py-3 border border-stone-200 text-stone-400 rounded-full font-medium cursor-not-allowed"
+        >
+          Reserved
+        </button>
+      )}
     </div>
   </motion.div>
 );
@@ -2052,42 +2066,86 @@ const AboutPage = ({ settings }: { settings: SiteSettings }) => (
   </section>
 );
 
-const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Dog[], puppies: Puppy[], setPage: (p: Page) => void }) => (
-  <div className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <SectionHeading title="Available Puppies" subtitle="All our current puppies, including available and reserved ones. Hand-raised with love." />
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
-      {puppies.map(puppy => <PuppyCard key={puppy.id} puppy={puppy} setPage={setPage} />)}
-      {puppies.length === 0 && <p className="col-span-full text-center text-stone-400 py-10">No puppies currently listed. Check back soon!</p>}
-    </div>
+const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Animal[], setPage: (p: Page) => void }) => {
+  const dams = dogs.filter(d => d.category === 'dam');
+  const sires = dogs.filter(d => d.category === 'sire');
 
-    <SectionHeading title="Our Dams & Sires" subtitle="The foundation of our program. Each of our adult dogs is a beloved family pet first." />
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-      {dogs.map((dog) => (
-        <div key={dog.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100">
-          <img src={dog.image} alt={dog.name} className="w-full h-64 object-cover" referrerPolicy="no-referrer" />
-          <div className="p-8">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-3xl font-serif font-bold text-stone-900">{dog.name}</h3>
-              <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase">{dog.role}</span>
+  return (
+    <div className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <SectionHeading title="Available Puppies" subtitle="All our current puppies, including available and reserved ones. Hand-raised with love." />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
+        {puppies.map(puppy => <PuppyCard key={puppy.id} puppy={puppy} setPage={setPage} />)}
+        {puppies.length === 0 && <p className="col-span-full text-center text-stone-400 py-10">No puppies currently listed. Check back soon!</p>}
+      </div>
+
+      <SectionHeading title="Our Dams & Sires" subtitle="The foundation of our program. Each of our adult dogs is a beloved family pet first." />
+      
+      {/* Sires Section */}
+      <div className="mb-16">
+        <h3 className="text-2xl font-serif font-bold text-stone-900 mb-8 flex items-center">
+          <div className="w-8 h-1 bg-brand-accent mr-3"></div>
+          Our Sires
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+          {sires.map((dog) => (
+            <div key={dog.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100">
+              <img src={dog.image} alt={dog.name} className="w-full h-64 object-cover" referrerPolicy="no-referrer" />
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-3xl font-serif font-bold text-stone-900">{dog.name}</h3>
+                  {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase">{dog.role}</span>}
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
+                  <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
+                  <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Color: {dog.color}</div>
+                  <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
+                  <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
-              <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
-              <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Color: {dog.color}</div>
-              <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
-              <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
+          ))}
+          {sires.length === 0 && (
+            <div className="col-span-full py-10 text-center text-stone-400">
+              <p>Our sires will be listed here soon.</p>
             </div>
-          </div>
+          )}
         </div>
-      ))}
-      {dogs.length === 0 && (
-        <div className="col-span-full py-20 text-center text-stone-400">
-          <Dog className="h-12 w-12 mx-auto mb-4 opacity-20" />
-          <p>Our dams and sires will be listed here soon.</p>
+      </div>
+
+      {/* Dams Section */}
+      <div>
+        <h3 className="text-2xl font-serif font-bold text-stone-900 mb-8 flex items-center">
+          <div className="w-8 h-1 bg-brand-accent mr-3"></div>
+          Our Dams
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+          {dams.map((dog) => (
+            <div key={dog.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100">
+              <img src={dog.image} alt={dog.name} className="w-full h-64 object-cover" referrerPolicy="no-referrer" />
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-3xl font-serif font-bold text-stone-900">{dog.name}</h3>
+                  {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase">{dog.role}</span>}
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
+                  <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
+                  <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Color: {dog.color}</div>
+                  <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
+                  <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {dams.length === 0 && (
+            <div className="col-span-full py-10 text-center text-stone-400">
+              <p>Our dams will be listed here soon.</p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ProcessPage = ({ settings }: { settings: SiteSettings }) => (
   <section className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -2453,13 +2511,15 @@ function AppContent() {
   const [page, setPage] = useState<Page>('home');
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [puppies, setPuppies] = useState<Puppy[]>([]);
-  const [dogs, setDogs] = useState<Dog[]>([]);
+  const [animals, setAnimals] = useState<Animal[]>([]);
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
+
+  const puppies = animals.filter(a => a.category === 'puppy');
+  const dogs = animals.filter(a => a.category === 'dam' || a.category === 'sire');
 
   // Auth Listener
   useEffect(() => {
@@ -2477,22 +2537,14 @@ function AppContent() {
 
   // Data Listeners
   useEffect(() => {
-    const qPuppies = query(collection(db, 'puppies'), orderBy('createdAt', 'desc'));
-    const unsubPuppies = onSnapshot(qPuppies, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Puppy));
-      setPuppies(data);
+    const qAnimals = query(collection(db, 'animals'), orderBy('createdAt', 'desc'));
+    const unsubAnimals = onSnapshot(qAnimals, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Animal));
+      setAnimals(data);
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'puppies');
+      handleFirestoreError(error, OperationType.LIST, 'animals');
       setLoading(false);
-    });
-
-    const qDogs = query(collection(db, 'dogs'), orderBy('createdAt', 'desc'));
-    const unsubDogs = onSnapshot(qDogs, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Dog));
-      setDogs(data);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'dogs');
     });
 
     const qTestimonials = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
@@ -2525,8 +2577,7 @@ function AppContent() {
     });
 
     return () => {
-      unsubPuppies();
-      unsubDogs();
+      unsubAnimals();
       unsubTestimonials();
       unsubApplications();
       unsubSettings();

@@ -29,7 +29,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { 
   auth, 
   db, 
@@ -178,6 +178,7 @@ interface Animal {
   weight?: string;
   color?: string;
   role?: string;
+  price?: number;
   createdAt?: any;
 }
 
@@ -571,6 +572,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   const [activeTab, setActiveTab] = useState<'dogs' | 'testimonials' | 'settings' | 'applications' | 'health'>('dogs');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+  const [isGeneratingTestimonial, setIsGeneratingTestimonial] = useState(false);
   const [editingDogId, setEditingDogId] = useState<string | null>(null);
   const [dogCategory, setDogCategory] = useState<'Puppy' | 'Dam' | 'Sire'>('Puppy');
   const [editingTestimonialId, setEditingTestimonialId] = useState<string | null>(null);
@@ -584,12 +586,14 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     description: '',
     role: 'Dam',
     weight: '',
-    color: ''
+    color: '',
+    price: 0
   });
   const [newTestimonial, setNewTestimonial] = useState<Partial<Testimonial>>({
     name: '',
     location: '',
     text: '',
+    rating: 5,
     image: 'https://picsum.photos/seed/user/100/100'
   });
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(settings);
@@ -694,6 +698,47 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     }
   };
 
+  const generateTestimonial = async () => {
+    setIsGeneratingTestimonial(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "Generate a realistic, heartwarming testimonial for a Yorkshire Terrier breeder named 'Yorkie Haven'. Include a full name, a location (City, State), and a 2-3 sentence testimonial about their experience with their new puppy and the breeder's professionalism. Return as JSON.",
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              location: { type: Type.STRING },
+              text: { type: Type.STRING },
+              rating: { type: Type.NUMBER }
+            },
+            required: ["name", "location", "text", "rating"]
+          }
+        }
+      });
+      
+      const data = JSON.parse(response.text);
+      if (data) {
+        const randomSeed = Math.floor(Math.random() * 1000);
+        setNewTestimonial({
+          ...newTestimonial,
+          name: data.name,
+          location: data.location,
+          text: data.text,
+          rating: data.rating || 5,
+          image: `https://picsum.photos/seed/user${randomSeed}/100/100`
+        });
+      }
+    } catch (error) {
+      console.error("AI Generation failed", error);
+    } finally {
+      setIsGeneratingTestimonial(false);
+    }
+  };
+
   const handleSaveDog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDog.name || !newDog.image) return;
@@ -754,7 +799,8 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         description: '',
         role: 'Dam',
         weight: '',
-        color: ''
+        color: '',
+        price: 0
       });
     } catch (error) {
       console.error("Failed to save dog", error);
@@ -840,6 +886,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         name: '',
         location: '',
         text: '',
+        rating: 5,
         image: 'https://picsum.photos/seed/user/100/100'
       });
     } catch (error) {
@@ -1076,6 +1123,16 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                     className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Price ($)</label>
+                  <input 
+                    type="number" 
+                    value={newDog.price}
+                    onChange={e => setNewDog({...newDog, price: Number(e.target.value)})}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
+                    placeholder="e.g., 2500"
+                  />
+                </div>
                 
                 {dogCategory === 'Puppy' ? (
                   <>
@@ -1289,6 +1346,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       <div className="flex-grow">
                         <h4 className="font-bold text-stone-900">{puppy.name}</h4>
                         <p className="text-xs text-stone-500">{puppy.status} • {puppy.gender}</p>
+                        {puppy.price > 0 && <p className="text-xs font-bold text-brand-primary mt-1">${puppy.price.toLocaleString()}</p>}
                       </div>
                       <div className="flex space-x-1">
                         <button 
@@ -1320,6 +1378,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       <div className="flex-grow">
                         <h4 className="font-bold text-stone-900">{dog.name}</h4>
                         <p className="text-xs text-stone-500">{dog.role} • {dog.weight}</p>
+                        {dog.price > 0 && <p className="text-xs font-bold text-brand-primary mt-1">${dog.price.toLocaleString()}</p>}
                       </div>
                       <div className="flex space-x-1">
                         <button 
@@ -1523,10 +1582,23 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
           <div className="lg:col-span-1">
             <div className="bg-white p-8 rounded-[32px] shadow-sm border border-stone-100 sticky top-24">
-              <h3 className="text-xl font-serif font-bold mb-6 flex items-center">
-                {editingTestimonialId ? <Settings className="h-5 w-5 mr-2 text-brand-primary" /> : <Plus className="h-5 w-5 mr-2 text-brand-primary" />}
-                {editingTestimonialId ? 'Edit Testimonial' : 'Add Testimonial'}
-              </h3>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-serif font-bold flex items-center">
+                  {editingTestimonialId ? <Settings className="h-5 w-5 mr-2 text-brand-primary" /> : <Plus className="h-5 w-5 mr-2 text-brand-primary" />}
+                  {editingTestimonialId ? 'Edit Testimonial' : 'Add Testimonial'}
+                </h3>
+                {!editingTestimonialId && (
+                  <button
+                    type="button"
+                    onClick={generateTestimonial}
+                    disabled={isGeneratingTestimonial}
+                    className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 px-3 py-1.5 bg-brand-secondary text-brand-primary rounded-full hover:bg-brand-secondary/80 transition-all disabled:opacity-50"
+                  >
+                    {isGeneratingTestimonial ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    Generate with AI
+                  </button>
+                )}
+              </div>
               <form onSubmit={handleSaveTestimonial} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Name</label>
@@ -1546,6 +1618,17 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                     onChange={e => setNewTestimonial({...newTestimonial, location: e.target.value})}
                     className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
                     placeholder="e.g., Austin, TX"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Rating (1-5)</label>
+                  <input 
+                    type="number" 
+                    min="1"
+                    max="5"
+                    value={newTestimonial.rating}
+                    onChange={e => setNewTestimonial({...newTestimonial, rating: parseInt(e.target.value)})}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2" 
                   />
                 </div>
                 <div>
@@ -1615,7 +1698,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       type="button"
                       onClick={() => {
                         setEditingTestimonialId(null);
-                        setNewTestimonial({ name: '', location: '', text: '', image: 'https://picsum.photos/seed/user/100/100' });
+                        setNewTestimonial({ name: '', location: '', text: '', rating: 5, image: 'https://picsum.photos/seed/user/100/100' });
                       }}
                       className="flex-1 bg-stone-200 text-stone-700 py-3 rounded-xl font-bold hover:bg-stone-300 transition-all"
                     >
@@ -1970,7 +2053,10 @@ const PuppyCard: React.FC<{ puppy: Animal, setPage: (p: Page) => void }> = ({ pu
     <div className="p-6 flex-grow flex flex-col">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-2xl font-serif font-bold text-stone-900">{puppy.name}</h3>
-        <span className="text-sm text-stone-500">{puppy.gender}</span>
+        <div className="text-right">
+          <span className="block text-sm text-stone-500">{puppy.gender}</span>
+          {puppy.price > 0 && <span className="block text-lg font-bold text-brand-primary">${puppy.price.toLocaleString()}</span>}
+        </div>
       </div>
       <p className="text-stone-600 text-sm mb-6 flex-grow">{puppy.description}</p>
       {puppy.status === 'available' ? (
@@ -2124,7 +2210,10 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
               <div className="p-8">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-3xl font-serif font-bold text-stone-900">{dog.name}</h3>
-                  {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase">{dog.role}</span>}
+                  <div className="flex flex-col items-end">
+                    {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase mb-2">{dog.role}</span>}
+                    {dog.price > 0 && <span className="text-xl font-bold text-brand-primary">${dog.price.toLocaleString()}</span>}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
@@ -2156,7 +2245,10 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
               <div className="p-8">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-3xl font-serif font-bold text-stone-900">{dog.name}</h3>
-                  {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase">{dog.role}</span>}
+                  <div className="flex flex-col items-end">
+                    {dog.role && <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase mb-2">{dog.role}</span>}
+                    {dog.price > 0 && <span className="text-xl font-bold text-brand-primary">${dog.price.toLocaleString()}</span>}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>

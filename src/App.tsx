@@ -601,6 +601,8 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     title: string;
   }>({ show: false, id: '', type: 'puppy', title: '' });
   const [viewingApplication, setViewingApplication] = useState<Application | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
   const [approvalDialog, setApprovalDialog] = useState<{ show: boolean, id: string, email: string, fullName: string, subject: string }>({
     show: false,
     id: '',
@@ -877,20 +879,23 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   };
 
   const handleUpdateAppStatus = async (id: string, status: 'Approved' | 'Rejected' | 'Pending', customSubject?: string) => {
+    if (isUpdatingStatus === id) return;
+    setIsUpdatingStatus(id);
     const path = `applications/${id}`;
     try {
       await updateDoc(doc(db, 'applications', id), { status });
       
-      if (status === 'Approved') {
+      if (status === 'Approved' || status === 'Rejected') {
         const app = applications.find(a => a.id === id);
         if (app) {
-          fetch('/api/send-approval-email', {
+          fetch('/api/send-application-status-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: app.email,
               fullName: app.fullName,
               companyName: settings.companyName,
+              status: status,
               subject: customSubject
             })
           })
@@ -898,15 +903,30 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
           .then(data => {
             if (data.error) {
               console.error("Email API error:", data.error);
+              setStatusMessage({ text: `Status updated but email failed: ${data.error}`, type: 'error' });
             } else {
               console.log("Email API success:", data.message);
+              setStatusMessage({ text: `Application ${status.toLowerCase()} and email sent!`, type: 'success' });
             }
+            setTimeout(() => setStatusMessage(null), 5000);
           })
-          .catch(err => console.error("Failed to send approval email", err));
+          .catch(err => {
+            console.error("Failed to send status email", err);
+            setStatusMessage({ text: `Status updated but email failed to send.`, type: 'error' });
+            setTimeout(() => setStatusMessage(null), 5000);
+          })
+          .finally(() => setIsUpdatingStatus(null));
+        } else {
+          setIsUpdatingStatus(null);
         }
+      } else {
+        setStatusMessage({ text: `Application status set to ${status}.`, type: 'success' });
+        setTimeout(() => setStatusMessage(null), 5000);
+        setIsUpdatingStatus(null);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
+      setIsUpdatingStatus(null);
     }
   };
 
@@ -975,6 +995,17 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         )}
       </AnimatePresence>
       <SectionHeading title="Admin Dashboard" subtitle="Manage your puppies and site content." />
+      
+      {statusMessage && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`mb-6 p-4 rounded-2xl flex items-center gap-3 ${statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}
+        >
+          {statusMessage.type === 'success' ? <CheckCircle2 className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
+          <span className="font-bold">{statusMessage.text}</span>
+        </motion.div>
+      )}
       
       <div className="flex space-x-4 mb-8 border-b border-stone-200 overflow-x-auto">
         <button 

@@ -237,7 +237,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
   location: 'Austin, Texas',
   heroTitle: 'Health-Tested Yorkie Puppies in Austin',
   heroSubtitle: 'Raising well-socialized, genetically-cleared Yorkshire Terriers for loving families.',
-  heroImage: 'https://images.unsplash.com/photo-1591768575198-88dac53fbd0a?auto=format&fit=crop&q=80&w=1920',
+  heroImage: '', // Start empty to avoid flickering
   aboutText: 'My journey with Yorkshire Terriers began over 15 years ago when I brought home my first Yorkie, Sophie. Her intelligence, loyalty, and spunky personality completely stole my heart.',
   aboutImage: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=800',
   aboutImage2: 'https://images.unsplash.com/photo-1512546148165-e44e731426df?auto=format&fit=crop&q=80&w=800',
@@ -1733,9 +1733,9 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
 
 // --- Page Views ---
 
-const HomePage = ({ setPage, puppies, testimonials, settings }: { setPage: (p: Page) => void, puppies: Puppy[], testimonials: Testimonial[], settings: SiteSettings }) => (
+const HomePage = ({ setPage, puppies, testimonials, settings, settingsLoading }: { setPage: (p: Page) => void, puppies: Puppy[], testimonials: Testimonial[], settings: SiteSettings, settingsLoading: boolean }) => (
   <div>
-    <Hero setPage={setPage} settings={settings} />
+    <Hero setPage={setPage} settings={settings} settingsLoading={settingsLoading} />
     
     {/* Featured Puppies */}
     <section className="py-24 bg-white">
@@ -1841,49 +1841,71 @@ const HomePage = ({ setPage, puppies, testimonials, settings }: { setPage: (p: P
   </div>
 );
 
-const Hero = ({ setPage, settings }: { setPage: (p: Page) => void, settings: SiteSettings }) => (
-  <section className="relative h-[80vh] flex items-center overflow-hidden">
-    <div className="absolute inset-0 z-0">
-      <img 
-        src={settings.heroImage} 
-        alt="Happy Yorkie" 
-        className="w-full h-full object-cover"
-        referrerPolicy="no-referrer"
-      />
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"></div>
-    </div>
-    
-    <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-white">
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="max-w-2xl"
-      >
-        <h1 className="text-5xl md:text-7xl font-serif font-bold leading-tight mb-6">
-          {settings.heroTitle}
-        </h1>
-        <p className="text-xl md:text-2xl font-light mb-8 opacity-90">
-          {settings.heroSubtitle}
-        </p>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <button 
-            onClick={() => setPage('our-dogs')}
-            className="bg-brand-primary text-white px-8 py-4 rounded-full text-lg font-medium hover:bg-brand-primary/90 transition-all flex items-center justify-center"
-          >
-            See Available Puppies <ChevronRight className="ml-2 h-5 w-5" />
-          </button>
-          <button 
-            onClick={() => setPage('process')}
-            className="bg-white/20 backdrop-blur-md text-white border border-white/30 px-8 py-4 rounded-full text-lg font-medium hover:bg-white/30 transition-all flex items-center justify-center"
-          >
-            Our Process
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  </section>
-);
+const Hero = ({ setPage, settings, settingsLoading }: { setPage: (p: Page) => void, settings: SiteSettings, settingsLoading: boolean }) => {
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  // Preload image
+  useEffect(() => {
+    if (settings.heroImage) {
+      const img = new Image();
+      img.src = settings.heroImage;
+      img.onload = () => setImageLoaded(true);
+    }
+  }, [settings.heroImage]);
+
+  // Don't render anything until settings are loaded and image is preloaded
+  if (settingsLoading || !settings.heroImage || !imageLoaded) {
+    return (
+      <section className="relative h-[80vh] flex items-center justify-center bg-stone-100">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-primary" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="relative h-[80vh] flex items-center overflow-hidden">
+      <div className="absolute inset-0 z-0">
+        <img 
+          src={settings.heroImage} 
+          alt="Happy Yorkie" 
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"></div>
+      </div>
+      
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-white">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="max-w-2xl"
+        >
+          <h1 className="text-5xl md:text-7xl font-serif font-bold leading-tight mb-6">
+            {settings.heroTitle}
+          </h1>
+          <p className="text-xl md:text-2xl font-light mb-8 opacity-90">
+            {settings.heroSubtitle}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <button 
+              onClick={() => setPage('our-dogs')}
+              className="bg-brand-primary text-white px-8 py-4 rounded-full text-lg font-medium hover:bg-brand-primary/90 transition-all flex items-center justify-center"
+            >
+              See Available Puppies <ChevronRight className="ml-2 h-5 w-5" />
+            </button>
+            <button 
+              onClick={() => setPage('process')}
+              className="bg-white/20 backdrop-blur-md text-white border border-white/30 px-8 py-4 rounded-full text-lg font-medium hover:bg-white/30 transition-all flex items-center justify-center"
+            >
+              Our Process
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+};
 
 const SectionHeading = ({ title, subtitle, centered = true }: { title: string, subtitle?: string, centered?: boolean }) => (
   <div className={`mb-12 ${centered ? 'text-center' : ''}`}>
@@ -2437,6 +2459,7 @@ function AppContent() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
+  const [settingsLoading, setSettingsLoading] = useState(true);
 
   // Auth Listener
   useEffect(() => {
@@ -2495,8 +2518,10 @@ function AppContent() {
       if (snapshot.exists()) {
         setSettings(snapshot.data() as SiteSettings);
       }
+      setSettingsLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/global');
+      setSettingsLoading(false);
     });
 
     return () => {
@@ -2523,15 +2548,15 @@ function AppContent() {
     }
 
     switch (page) {
-      case 'home': return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} />;
+      case 'home': return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
       case 'about': return <AboutPage settings={settings} />;
       case 'our-dogs': return <OurDogsPage dogs={dogs} puppies={puppies} setPage={setPage} />;
       case 'process': return <ProcessPage settings={settings} />;
       case 'faq': return <FAQPage />;
       case 'contact': return <ContactPage settings={settings} />;
       case 'apply': return <ApplicationPage />;
-      case 'admin': return isAdmin ? <AdminDashboard puppies={puppies} dogs={dogs} testimonials={testimonials} settings={settings} applications={applications} /> : <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} />;
-      default: return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} />;
+      case 'admin': return isAdmin ? <AdminDashboard puppies={puppies} dogs={dogs} testimonials={testimonials} settings={settings} applications={applications} /> : <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
+      default: return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
     }
   };
 

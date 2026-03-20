@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, Component } from 'react';
+import confetti from 'canvas-confetti';
 import { 
   Heart, 
   Dog, 
@@ -9,6 +10,7 @@ import {
   Phone, 
   MapPin, 
   ChevronRight, 
+  ChevronLeft, 
   Star, 
   Menu, 
   X,
@@ -26,7 +28,13 @@ import {
   Sparkles,
   Upload,
   Clock,
-  XCircle
+  XCircle,
+  Search,
+  Copy,
+  ChevronUp,
+  Send,
+  User,
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -179,6 +187,10 @@ interface Animal {
   color?: string;
   role?: string;
   price?: number;
+  lineage?: string;
+  temperament?: string;
+  achievements?: string;
+  healthClearances?: string;
   createdAt?: any;
 }
 
@@ -208,6 +220,8 @@ interface SiteSettings {
   geneticHealthTesting: string;
   vetChecks: string;
   returnPolicy: string;
+  puppyStarterKit: string;
+  waitlistPolicy: string;
 }
 
 interface Application {
@@ -238,9 +252,11 @@ const DEFAULT_SETTINGS: SiteSettings = {
   aboutImage2: 'https://images.unsplash.com/photo-1512546148165-e44e731426df?auto=format&fit=crop&q=80&w=800',
   instagram: '#',
   facebook: '#',
-  geneticHealthTesting: 'All our breeding dogs undergo extensive genetic testing for common Yorkshire Terrier health issues including Patellar Luxation, Legg-Calve-Perthes Disease, and Progressive Retinal Atrophy (PRA).',
-  vetChecks: 'Every puppy receives a comprehensive wellness exam from our licensed veterinarian at 6, 9, and 12 weeks of age. They come with a full health record and up-to-date vaccinations.',
-  returnPolicy: 'We offer a 2-year genetic health guarantee. If a life-threatening genetic condition is discovered, we provide a replacement puppy or a full refund. We also have a lifetime return policy—if you can ever no longer care for your dog, they must return to us.'
+  geneticHealthTesting: 'Our breeding program is built on a foundation of health and longevity. Every Dam and Sire in our program undergoes a rigorous screening process before being cleared for breeding. This includes full genetic panels to screen for over 200 genetic markers, including Progressive Retinal Atrophy (PRA-PRCD), Degenerative Myelopathy (DM), and Hyperuricosuria (HUU). Additionally, we perform physical evaluations for Patellar Luxation and cardiac health to ensure our Yorkies are as healthy as they are beautiful.',
+  vetChecks: 'From the moment they are born, our puppies receive premium veterinary care. Puppies undergo their first comprehensive wellness exam at 6 weeks, followed by subsequent checks at 9 and 12 weeks. They are kept on a strict deworming schedule starting at 2 weeks of age and receive their first two rounds of core vaccinations (DHPP) before leaving our care. Each puppy comes with a detailed health record signed by our licensed veterinarian.',
+  returnPolicy: 'We stand behind the health of our puppies with a comprehensive 2-year Genetic Health Guarantee covering life-threatening hereditary defects. Furthermore, we are committed to our dogs for their entire lives. We have a strict "No Shelter" policy—if at any point in your dog\'s life you are unable to keep them, they must be returned to us. We will always provide a safe haven for any dog we have brought into this world.',
+  puppyStarterKit: 'Each puppy goes home with a comprehensive starter kit to ensure a smooth transition. This includes a 3-day supply of premium puppy food, a "scent blanket" with mom and siblings\' scent, a high-quality harness and leash, their first set of toys, and a folder containing their health records, AKC registration paperwork, and a "Puppy Care Guide" written by us.',
+  waitlistPolicy: 'To join our waitlist, you must first complete an application. Once approved, a $500 non-refundable deposit is required to secure your place. This deposit is applied toward the final purchase price of your puppy. Waitlist members are given priority selection in the order their deposits were received. If you are not ready for a puppy when your turn comes, you may "pass" and maintain your position for the next available litter.'
 };
 
 // --- Components ---
@@ -573,6 +589,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
   const [isGeneratingTestimonial, setIsGeneratingTestimonial] = useState(false);
+  const [isGeneratingHealth, setIsGeneratingHealth] = useState(false);
   const [editingDogId, setEditingDogId] = useState<string | null>(null);
   const [dogCategory, setDogCategory] = useState<'Puppy' | 'Dam' | 'Sire'>('Puppy');
   const [editingTestimonialId, setEditingTestimonialId] = useState<string | null>(null);
@@ -587,7 +604,11 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     role: 'Dam',
     weight: '',
     color: '',
-    price: 0
+    price: 0,
+    lineage: '',
+    temperament: '',
+    achievements: '',
+    healthClearances: ''
   });
   const [newTestimonial, setNewTestimonial] = useState<Partial<Testimonial>>({
     name: '',
@@ -739,6 +760,43 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     }
   };
 
+  const generateHealthPolicies = async () => {
+    setIsGeneratingHealth(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "Generate professional, comprehensive health guarantee and policies for a high-end Yorkshire Terrier breeder named 'Yorkie Haven'. Include: 1. Genetic Health Testing protocols (PRA, DM, HUU, etc.), 2. Vet Checks and Vaccination schedule, 3. A 2-year Genetic Health Guarantee and lifetime return policy, 4. A comprehensive Puppy Starter Kit description, 5. A clear Waitlist and Deposit policy. Return as JSON.",
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              geneticHealthTesting: { type: Type.STRING },
+              vetChecks: { type: Type.STRING },
+              returnPolicy: { type: Type.STRING },
+              puppyStarterKit: { type: Type.STRING },
+              waitlistPolicy: { type: Type.STRING }
+            },
+            required: ["geneticHealthTesting", "vetChecks", "returnPolicy", "puppyStarterKit", "waitlistPolicy"]
+          }
+        }
+      });
+      
+      const data = JSON.parse(response.text);
+      if (data) {
+        setSiteSettings({
+          ...siteSettings,
+          ...data
+        });
+      }
+    } catch (error) {
+      console.error("AI Generation failed", error);
+    } finally {
+      setIsGeneratingHealth(false);
+    }
+  };
+
   const handleSaveDog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDog.name || !newDog.image) return;
@@ -759,6 +817,10 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         delete dogData.role;
         delete dogData.weight;
         delete dogData.color;
+        delete dogData.lineage;
+        delete dogData.temperament;
+        delete dogData.achievements;
+        delete dogData.healthClearances;
       } else {
         delete dogData.gender;
         delete dogData.status;
@@ -800,7 +862,11 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         role: 'Dam',
         weight: '',
         color: '',
-        price: 0
+        price: 0,
+        lineage: '',
+        temperament: '',
+        achievements: '',
+        healthClearances: ''
       });
     } catch (error) {
       console.error("Failed to save dog", error);
@@ -1043,6 +1109,25 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
       </AnimatePresence>
       <SectionHeading title="Admin Dashboard" subtitle="Manage your puppies and site content." />
       
+      {/* Quick Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        {[
+          { label: 'Total Puppies', value: puppies.length, icon: Dog, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Available', value: puppies.filter(p => p.status === 'available').length, icon: Sparkles, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'Pending Apps', value: applications.filter(a => a.status === 'Pending').length, icon: ClipboardCheck, color: 'text-amber-600', bg: 'bg-amber-50' },
+          { label: 'Dams', value: dogs.filter(d => d.category === 'dam').length, icon: Heart, color: 'text-rose-600', bg: 'bg-rose-50' },
+          { label: 'Sires', value: dogs.filter(d => d.category === 'sire').length, icon: Star, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+        ].map((stat, idx) => (
+          <div key={idx} className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm flex flex-col items-center text-center">
+            <div className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center mb-2`}>
+              <stat.icon className="w-5 h-5" />
+            </div>
+            <span className="text-2xl font-bold text-stone-900">{stat.value}</span>
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">{stat.label}</span>
+          </div>
+        ))}
+      </div>
+
       {statusMessage && (
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
@@ -1162,7 +1247,26 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">DOB</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-stone-500 uppercase">DOB</label>
+                        {newDog.dob && (
+                          <span className="text-[10px] font-bold text-stone-400">
+                            {(() => {
+                              const birthDate = new Date(newDog.dob);
+                              const today = new Date();
+                              let age = today.getFullYear() - birthDate.getFullYear();
+                              const m = today.getMonth() - birthDate.getMonth();
+                              if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+                              
+                              if (age === 0) {
+                                const months = (today.getFullYear() - birthDate.getFullYear()) * 12 + today.getMonth() - birthDate.getMonth();
+                                return `${months} month${months !== 1 ? 's' : ''} old`;
+                              }
+                              return `${age} year${age !== 1 ? 's' : ''} old`;
+                            })()}
+                          </span>
+                        )}
+                      </div>
                       <input 
                         type="date" 
                         value={newDog.dob}
@@ -1215,6 +1319,36 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                           placeholder="e.g., Blue & Gold"
                         />
                       </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Lineage / Pedigree</label>
+                      <textarea 
+                        rows={2} 
+                        value={newDog.lineage}
+                        onChange={e => setNewDog({...newDog, lineage: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        placeholder="e.g., Champion bloodlines, AKC registered parents..."
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Temperament</label>
+                      <textarea 
+                        rows={2} 
+                        value={newDog.temperament}
+                        onChange={e => setNewDog({...newDog, temperament: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        placeholder="e.g., Sweet, playful, calm..."
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Achievements / Health Clearances</label>
+                      <textarea 
+                        rows={2} 
+                        value={newDog.healthClearances}
+                        onChange={e => setNewDog({...newDog, healthClearances: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        placeholder="e.g., OFA Heart/Eyes, AKC Champion..."
+                      ></textarea>
                     </div>
                   </>
                 )}
@@ -1406,9 +1540,40 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
 
       {activeTab === 'health' && (
         <div className="max-w-3xl mx-auto bg-white p-8 rounded-[40px] shadow-sm border border-stone-100">
-          <h3 className="text-2xl font-serif font-bold mb-8 flex items-center">
-            <Heart className="h-6 w-6 mr-2 text-brand-primary" /> Health Guarantee & Policies
-          </h3>
+          <div className="flex justify-between items-center mb-8">
+            <h3 className="text-2xl font-serif font-bold flex items-center">
+              <Heart className="h-6 w-6 mr-2 text-brand-primary" /> Health Guarantee & Policies
+            </h3>
+            <div className="flex items-center gap-3">
+              <button 
+                type="button"
+                onClick={generateHealthPolicies}
+                disabled={isGeneratingHealth}
+                className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 px-3 py-1.5 bg-brand-secondary text-brand-primary rounded-full hover:bg-brand-secondary/80 transition-all disabled:opacity-50"
+              >
+                {isGeneratingHealth ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                AI Autofill
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Reset health policies to recommended defaults?')) {
+                    setSiteSettings({
+                      ...siteSettings,
+                      geneticHealthTesting: DEFAULT_SETTINGS.geneticHealthTesting,
+                      vetChecks: DEFAULT_SETTINGS.vetChecks,
+                      returnPolicy: DEFAULT_SETTINGS.returnPolicy,
+                      puppyStarterKit: DEFAULT_SETTINGS.puppyStarterKit,
+                      waitlistPolicy: DEFAULT_SETTINGS.waitlistPolicy
+                    });
+                  }
+                }}
+                className="text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 bg-stone-100 text-stone-600 rounded-full hover:bg-stone-200 transition-all"
+              >
+                Reset to Recommended
+              </button>
+            </div>
+          </div>
           <form onSubmit={handleSaveSettings} className="space-y-6">
             <div>
               <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Genetic Health Testing</label>
@@ -1438,6 +1603,26 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                 onChange={e => setSiteSettings({...siteSettings, returnPolicy: e.target.value})}
                 className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
                 placeholder="Detail your health guarantee and lifetime return policy..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Puppy Starter Kit</label>
+              <textarea 
+                rows={4}
+                value={siteSettings.puppyStarterKit}
+                onChange={e => setSiteSettings({...siteSettings, puppyStarterKit: e.target.value})}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
+                placeholder="Describe what comes with the puppy..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Waitlist Policy</label>
+              <textarea 
+                rows={4}
+                value={siteSettings.waitlistPolicy}
+                onChange={e => setSiteSettings({...siteSettings, waitlistPolicy: e.target.value})}
+                className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3" 
+                placeholder="Describe your waitlist and deposit process..."
               />
             </div>
             <button 
@@ -1753,6 +1938,20 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
       )}
       {activeTab === 'applications' && (
         <div className="space-y-6">
+          {applications.length > 0 && (
+            <div className="flex justify-end mb-4">
+              <button 
+                onClick={() => {
+                  const emails = applications.map(app => app.email).join(', ');
+                  navigator.clipboard.writeText(emails);
+                }}
+                className="flex items-center gap-2 text-xs font-bold text-stone-500 hover:text-stone-900 transition-colors uppercase tracking-widest"
+              >
+                <Copy className="h-4 w-4" />
+                Copy All Emails
+              </button>
+            </div>
+          )}
           {applications.map(app => (
             <div key={app.id} className="bg-white p-8 rounded-[32px] border border-stone-100 shadow-sm">
               <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
@@ -1761,7 +1960,17 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                     <h3 className="text-xl font-serif font-bold text-stone-900">{app.fullName}</h3>
                     <StatusBadge status={app.status} />
                   </div>
-                  <p className="text-stone-500 text-sm">{app.email} • {app.phone} • {app.location}</p>
+                  <div className="flex items-center gap-2 text-stone-500 text-sm">
+                    <span>{app.email}</span>
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(app.email)}
+                      className="p-1 hover:bg-stone-100 rounded-md transition-colors"
+                      title="Copy Email"
+                    >
+                      <Copy className="h-3 w-3" />
+                    </button>
+                    <span>• {app.phone} • {app.location}</span>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button 
@@ -1848,6 +2057,137 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
   );
 };
 
+// --- Yorkie Assistant Component ---
+
+const YorkieAssistant = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<{ role: 'user' | 'bot', text: string }[]>([
+    { role: 'bot', text: "Hi! I'm your Yorkie Haven assistant. Ask me anything about Yorkies, our breeding process, or how to care for your new puppy!" }
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMsg = input.trim();
+    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: userMsg,
+        config: {
+          systemInstruction: "You are a helpful and friendly assistant for 'Yorkie Haven', a premium Yorkshire Terrier breeder. You are knowledgeable about Yorkies, their temperament, care, grooming, and the specific breeding practices of Yorkie Haven (which focuses on health, socialization, and AKC standards). Keep your answers concise, warm, and professional. If you don't know something specific about Yorkie Haven's current availability, suggest they check the 'Available Puppies' page or contact the breeder directly.",
+        },
+      });
+
+      setMessages(prev => [...prev, { role: 'bot', text: response.text || "I'm sorry, I couldn't process that. Please try again!" }]);
+    } catch (error) {
+      console.error("AI Error:", error);
+      setMessages(prev => [...prev, { role: 'bot', text: "Oops! I'm having a little trouble connecting. Please try again later." }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed bottom-8 left-8 z-50">
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 20, x: -20 }}
+            animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20, x: -20 }}
+            className="mb-4 w-80 md:w-96 bg-white rounded-[32px] shadow-2xl border border-stone-100 overflow-hidden flex flex-col h-[500px]"
+          >
+            {/* Header */}
+            <div className="bg-stone-900 p-6 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-brand-primary rounded-full flex items-center justify-center">
+                  <Bot className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h4 className="font-serif font-bold">Yorkie Assistant</h4>
+                  <p className="text-[10px] text-stone-400 uppercase tracking-widest">Always here to help</p>
+                </div>
+              </div>
+              <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div ref={scrollRef} className="flex-grow overflow-y-auto p-6 space-y-4 bg-stone-50/50">
+              {messages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-brand-primary text-white rounded-tr-none' 
+                      : 'bg-white text-stone-700 shadow-sm border border-stone-100 rounded-tl-none'
+                  }`}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border border-stone-100">
+                    <Loader2 className="w-4 h-4 animate-spin text-stone-400" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input */}
+            <div className="p-4 bg-white border-t border-stone-100">
+              <div className="relative">
+                <input 
+                  type="text" 
+                  placeholder="Ask a question..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  className="w-full pl-4 pr-12 py-3 bg-stone-100 border-none rounded-2xl focus:ring-2 focus:ring-brand-primary outline-none transition-all text-sm"
+                />
+                <button 
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-brand-primary text-white rounded-xl disabled:opacity-50 transition-all"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-16 h-16 bg-brand-primary text-white rounded-full shadow-2xl flex items-center justify-center relative group"
+      >
+        {isOpen ? <X className="w-8 h-8" /> : <MessageSquare className="w-8 h-8" />}
+        {!isOpen && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse" />
+        )}
+      </motion.button>
+    </div>
+  );
+};
+
 // --- Page Views ---
 
 const HomePage = ({ setPage, puppies, testimonials, settings, settingsLoading }: { setPage: (p: Page) => void, puppies: Animal[], testimonials: Testimonial[], settings: SiteSettings, settingsLoading: boolean }) => (
@@ -1921,6 +2261,26 @@ const HomePage = ({ setPage, puppies, testimonials, settings, settingsLoading }:
               <p className="text-brand-primary font-serif italic text-lg mb-2">"A Yorkie isn't just a pet, they are a piece of your heart."</p>
               <p className="text-stone-500 text-sm font-bold">— {settings.companyName} Family</p>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {/* Interactive Yorkie Facts */}
+    <section className="py-24 bg-white overflow-hidden">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+          <div className="order-2 lg:order-1">
+            <YorkieFacts />
+          </div>
+          <div className="order-1 lg:order-2">
+            <SectionHeading 
+              title="Yorkie Fun Facts" 
+              subtitle="Learn more about this amazing breed through our interactive fact explorer."
+              centered={false}
+            />
+            <p className="text-stone-600 mb-8">Yorkshire Terriers are small in size but big in personality. Click through the facts to discover what makes them so special!</p>
+            <PuppyNameGenerator />
           </div>
         </div>
       </div>
@@ -2032,51 +2392,64 @@ const SectionHeading = ({ title, subtitle, centered = true }: { title: string, s
   </div>
 );
 
-const PuppyCard: React.FC<{ puppy: Animal, setPage: (p: Page) => void }> = ({ puppy, setPage }) => (
-  <motion.div 
-    whileHover={{ y: -10 }}
-    className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100 flex flex-col h-full"
-  >
-    <div className="relative aspect-[3/4] overflow-hidden">
-      <img 
-        src={puppy.image} 
-        alt={puppy.name} 
-        className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
-        referrerPolicy="no-referrer"
-      />
-      <div className={`absolute top-4 right-4 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-        puppy.status === 'available' ? 'bg-green-500/90 text-white' : 'bg-stone-500/90 text-white'
-      }`}>
-        {puppy.status}
-      </div>
-    </div>
-    <div className="p-6 flex-grow flex flex-col">
-      <div className="flex justify-between items-center mb-2">
-        <h3 className="text-2xl font-serif font-bold text-stone-900">{puppy.name}</h3>
-        <div className="text-right">
-          <span className="block text-sm text-stone-500">{puppy.gender}</span>
-          {puppy.price > 0 && <span className="block text-lg font-bold text-brand-primary">${puppy.price.toLocaleString()}</span>}
+const PuppyCard: React.FC<{ puppy: Animal, setPage: (p: Page) => void }> = ({ puppy, setPage }) => {
+  const [isLiked, setIsLiked] = useState(false);
+
+  return (
+    <motion.div 
+      whileHover={{ y: -10 }}
+      className="bg-white rounded-3xl overflow-hidden shadow-sm border border-stone-100 flex flex-col h-full group"
+    >
+      <div className="relative aspect-[3/4] overflow-hidden">
+        <img 
+          src={puppy.image} 
+          alt={puppy.name} 
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+          referrerPolicy="no-referrer"
+        />
+        <div className={`absolute top-4 right-4 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider z-10 ${
+          puppy.status === 'available' ? 'bg-green-500/90 text-white' : 'bg-stone-500/90 text-white'
+        }`}>
+          {puppy.status}
         </div>
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsLiked(!isLiked);
+          }}
+          className="absolute bottom-4 right-4 z-10 p-3 bg-white/80 backdrop-blur-md rounded-full shadow-lg hover:bg-white transition-all group/heart"
+        >
+          <Heart className={`w-5 h-5 transition-all ${isLiked ? 'fill-red-500 text-red-500 scale-125' : 'text-stone-400 group-hover/heart:text-red-400'}`} />
+        </button>
       </div>
-      <p className="text-stone-600 text-sm mb-6 flex-grow">{puppy.description}</p>
-      {puppy.status === 'available' ? (
-        <button 
-          onClick={() => setPage('apply')}
-          className="w-full py-3 border border-brand-primary text-brand-primary rounded-full font-medium hover:bg-brand-primary hover:text-white transition-all"
-        >
-          Apply for {puppy.name}
-        </button>
-      ) : (
-        <button 
-          disabled
-          className="w-full py-3 border border-stone-200 text-stone-400 rounded-full font-medium cursor-not-allowed"
-        >
-          Reserved
-        </button>
-      )}
-    </div>
-  </motion.div>
-);
+      <div className="p-6 flex-grow flex flex-col">
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="text-2xl font-serif font-bold text-stone-900">{puppy.name}</h3>
+          <div className="text-right">
+            <span className="block text-sm text-stone-500">{puppy.gender}</span>
+            {puppy.price > 0 && <span className="block text-lg font-bold text-brand-primary">${puppy.price.toLocaleString()}</span>}
+          </div>
+        </div>
+        <p className="text-stone-600 text-sm mb-6 flex-grow">{puppy.description}</p>
+        {puppy.status === 'available' ? (
+          <button 
+            onClick={() => setPage('apply')}
+            className="w-full py-3 border border-brand-primary text-brand-primary rounded-full font-medium hover:bg-brand-primary hover:text-white transition-all transform active:scale-95"
+          >
+            Apply for {puppy.name}
+          </button>
+        ) : (
+          <button 
+            disabled
+            className="w-full py-3 border border-stone-200 text-stone-400 rounded-full font-medium cursor-not-allowed"
+          >
+            Reserved
+          </button>
+        )}
+      </div>
+    </motion.div>
+  );
+};
 
 const TestimonialCard: React.FC<{ testimonial: Testimonial }> = ({ testimonial }) => (
   <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
@@ -2183,16 +2556,158 @@ const AboutPage = ({ settings }: { settings: SiteSettings }) => (
   </section>
 );
 
+const DogDetailModal: React.FC<{ dog: Animal, onClose: () => void }> = ({ dog, onClose }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.9, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.9, y: 20 }}
+      className="bg-white rounded-[40px] shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
+    >
+      <div className="md:w-1/2 relative h-64 md:h-auto">
+        <img src={dog.image} alt={dog.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <button 
+          onClick={onClose}
+          className="absolute top-4 left-4 p-2 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-md transition-all md:hidden"
+        >
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+      <div className="md:w-1/2 p-8 md:p-12 overflow-y-auto">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h2 className="text-4xl font-serif font-bold text-stone-900 mb-2">{dog.name}</h2>
+            <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest">{dog.role}</span>
+          </div>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-stone-100 rounded-full text-stone-400 transition-all hidden md:block"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-6 mb-8">
+          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Weight</p>
+            <p className="font-medium text-stone-900">{dog.weight || 'N/A'}</p>
+          </div>
+          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Color</p>
+            <p className="font-medium text-stone-900">{dog.color || 'N/A'}</p>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          {dog.lineage && (
+            <div>
+              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
+                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
+                Lineage & Pedigree
+              </h4>
+              <p className="text-stone-600 text-sm leading-relaxed">{dog.lineage}</p>
+            </div>
+          )}
+          {dog.temperament && (
+            <div>
+              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
+                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
+                Temperament
+              </h4>
+              <p className="text-stone-600 text-sm leading-relaxed">{dog.temperament}</p>
+            </div>
+          )}
+          {dog.healthClearances && (
+            <div>
+              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
+                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
+                Health & Achievements
+              </h4>
+              <p className="text-stone-600 text-sm leading-relaxed">{dog.healthClearances}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-12 pt-8 border-t border-stone-100">
+          <div className="flex items-center space-x-4 text-xs text-stone-400">
+            <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> Health Tested</div>
+            <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> AKC Registered</div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  </div>
+);
+
 const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Animal[], setPage: (p: Page) => void }) => {
+  const [selectedDog, setSelectedDog] = useState<Animal | null>(null);
+  const [puppySearch, setPuppySearch] = useState('');
+  const [puppyFilter, setPuppyFilter] = useState<'all' | 'available' | 'reserved'>('all');
+
+  const filteredPuppies = puppies.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(puppySearch.toLowerCase()) || 
+                         p.color.toLowerCase().includes(puppySearch.toLowerCase());
+    const matchesFilter = puppyFilter === 'all' || p.status === puppyFilter;
+    return matchesSearch && matchesFilter;
+  });
+
   const dams = dogs.filter(d => d.category === 'dam');
   const sires = dogs.filter(d => d.category === 'sire');
 
   return (
     <div className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <AnimatePresence>
+        {selectedDog && (
+          <DogDetailModal dog={selectedDog} onClose={() => setSelectedDog(null)} />
+        )}
+      </AnimatePresence>
       <SectionHeading title="Available Puppies" subtitle="All our current puppies, including available and reserved ones. Hand-raised with love." />
+      
+      {/* Puppy Filters */}
+      <div className="mb-12 flex flex-col md:flex-row gap-4 items-center justify-between bg-stone-100/50 p-6 rounded-2xl border border-stone-200">
+        <div className="relative w-full md:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+          <input 
+            type="text" 
+            placeholder="Search puppies by name or color..." 
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-400 focus:border-transparent outline-none transition-all text-stone-700"
+            value={puppySearch}
+            onChange={(e) => setPuppySearch(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2 p-1 bg-stone-200/50 rounded-xl w-full md:w-auto">
+          {(['all', 'available', 'reserved'] as const).map((filter) => (
+            <button
+              key={filter}
+              onClick={() => setPuppyFilter(filter)}
+              className={`flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-medium transition-all capitalize ${
+                puppyFilter === filter 
+                  ? 'bg-white text-stone-900 shadow-sm' 
+                  : 'text-stone-500 hover:text-stone-700'
+              }`}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-24">
-        {puppies.map(puppy => <PuppyCard key={puppy.id} puppy={puppy} setPage={setPage} />)}
-        {puppies.length === 0 && <p className="col-span-full text-center text-stone-400 py-10">No puppies currently listed. Check back soon!</p>}
+        {filteredPuppies.map(puppy => <PuppyCard key={puppy.id} puppy={puppy} setPage={setPage} />)}
+        {filteredPuppies.length === 0 && (
+          <div className="col-span-full text-center py-20 bg-stone-50 rounded-3xl border-2 border-dashed border-stone-200">
+            <div className="w-16 h-16 bg-stone-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search className="w-8 h-8 text-stone-300" />
+            </div>
+            <p className="text-stone-500 font-medium">No puppies match your search criteria.</p>
+            <button 
+              onClick={() => { setPuppySearch(''); setPuppyFilter('all'); }}
+              className="mt-4 text-stone-900 underline underline-offset-4 hover:text-stone-600 transition-colors"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
       </div>
 
       <SectionHeading title="Our Dams & Sires" subtitle="The foundation of our program. Each of our adult dogs is a beloved family pet first." />
@@ -2215,12 +2730,19 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
                     {dog.price > 0 && <span className="text-xl font-bold text-brand-primary">${dog.price.toLocaleString()}</span>}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
+                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600 mb-8">
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Color: {dog.color}</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
                 </div>
+                <button 
+                  onClick={() => setSelectedDog(dog)}
+                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group"
+                >
+                  View Full Profile
+                  <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </button>
               </div>
             </div>
           ))}
@@ -2250,12 +2772,19 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
                     {dog.price > 0 && <span className="text-xl font-bold text-brand-primary">${dog.price.toLocaleString()}</span>}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600">
+                <div className="grid grid-cols-2 gap-4 text-sm text-stone-600 mb-8">
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Weight: {dog.weight}</div>
                   <div className="flex items-center"><Info className="h-4 w-4 mr-2 text-brand-accent" /> Color: {dog.color}</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
                 </div>
+                <button 
+                  onClick={() => setSelectedDog(dog)}
+                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group"
+                >
+                  View Full Profile
+                  <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </button>
               </div>
             </div>
           ))}
@@ -2281,15 +2810,22 @@ const ProcessPage = ({ settings }: { settings: SiteSettings }) => (
         { step: '04', title: 'Puppy Updates', desc: 'Receive weekly photos and videos as your puppy grows and develops.' },
         { step: '05', title: 'Go-Home Day', desc: 'At 10-12 weeks, your puppy is ready to join your family! We provide a full puppy starter kit.' }
       ].map((item, i) => (
-        <div key={i} className="flex mb-12 last:mb-0">
+        <motion.div 
+          key={i} 
+          initial={{ opacity: 0, x: -20 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: i * 0.1 }}
+          className="flex mb-12 last:mb-0 group"
+        >
           <div className="mr-8">
-            <div className="text-5xl font-serif font-bold text-brand-accent/30">{item.step}</div>
+            <div className="text-5xl font-serif font-bold text-brand-accent/30 transition-colors group-hover:text-brand-accent/60">{item.step}</div>
           </div>
-          <div className="pt-2 border-l-2 border-brand-accent/20 pl-8">
+          <div className="pt-2 border-l-2 border-brand-accent/20 pl-8 transition-colors group-hover:border-brand-accent/50">
             <h4 className="text-2xl font-serif font-bold text-stone-900 mb-2">{item.title}</h4>
             <p className="text-stone-600 leading-relaxed">{item.desc}</p>
           </div>
-        </div>
+        </motion.div>
       ))}
     </div>
 
@@ -2324,20 +2860,151 @@ const ProcessPage = ({ settings }: { settings: SiteSettings }) => (
           <p className="text-stone-600 text-sm leading-relaxed">{settings.returnPolicy}</p>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mt-12">
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+          <div className="w-12 h-12 bg-brand-accent/20 rounded-2xl flex items-center justify-center mb-6">
+            <ClipboardCheck className="h-6 w-6 text-brand-primary" />
+          </div>
+          <h4 className="text-xl font-serif font-bold text-stone-900 mb-4">Puppy Starter Kit</h4>
+          <p className="text-stone-600 text-sm leading-relaxed">{settings.puppyStarterKit}</p>
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+          <div className="w-12 h-12 bg-brand-accent/20 rounded-2xl flex items-center justify-center mb-6">
+            <Clock className="h-6 w-6 text-brand-primary" />
+          </div>
+          <h4 className="text-xl font-serif font-bold text-stone-900 mb-4">Waitlist Policy</h4>
+          <p className="text-stone-600 text-sm leading-relaxed">{settings.waitlistPolicy}</p>
+        </div>
+      </div>
     </div>
   </section>
 );
 
-const FAQPage = () => (
+const YorkieFacts = () => {
+  const facts = [
+    { title: "Brave Beginnings", text: "Yorkies were originally bred in the 19th century in Yorkshire, England, to catch rats in clothing mills.", icon: <Sparkles className="w-6 h-6" /> },
+    { title: "Tiny Giants", text: "Despite their small size, Yorkies are known for their 'big dog' personality and fearless nature.", icon: <Dog className="w-6 h-6" /> },
+    { title: "Hypoallergenic", text: "Their hair is more like human hair than fur, making them a great choice for many allergy sufferers.", icon: <CheckCircle2 className="w-6 h-6" /> },
+    { title: "Long Lived", text: "With proper care, Yorkies can live for 13-16 years, providing over a decade of companionship.", icon: <Heart className="w-6 h-6" /> },
+    { title: "Smart & Sassy", text: "They are highly intelligent and can be easily trained, though they do have a stubborn streak!", icon: <Star className="w-6 h-6" /> }
+  ];
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  return (
+    <div className="bg-brand-secondary p-8 md:p-12 rounded-[48px] shadow-inner relative overflow-hidden h-[400px] flex flex-col justify-center">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentIndex}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          className="relative z-10"
+        >
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-8 shadow-sm text-brand-primary">
+            {facts[currentIndex].icon}
+          </div>
+          <h3 className="text-3xl font-serif font-bold text-stone-900 mb-4">{facts[currentIndex].title}</h3>
+          <p className="text-lg text-stone-600 leading-relaxed">{facts[currentIndex].text}</p>
+        </motion.div>
+      </AnimatePresence>
+
+      <div className="absolute bottom-12 left-12 flex space-x-4">
+        <button 
+          onClick={() => setCurrentIndex((prev) => (prev === 0 ? facts.length - 1 : prev - 1))}
+          className="p-3 bg-white rounded-full shadow-sm hover:bg-stone-50 transition-colors"
+        >
+          <ChevronLeft className="w-6 h-6 text-stone-600" />
+        </button>
+        <button 
+          onClick={() => setCurrentIndex((prev) => (prev === facts.length - 1 ? 0 : prev + 1))}
+          className="p-3 bg-white rounded-full shadow-sm hover:bg-stone-50 transition-colors"
+        >
+          <ChevronRight className="w-6 h-6 text-stone-600" />
+        </button>
+      </div>
+
+      <div className="absolute top-12 right-12 text-stone-300 font-serif text-8xl opacity-20 pointer-events-none">
+        {currentIndex + 1}
+      </div>
+    </div>
+  );
+};
+
+const PuppyNameGenerator = () => {
+  const names = {
+    male: ["Charlie", "Teddy", "Cooper", "Bentley", "Oliver", "Milo", "Winston", "Gizmo", "Archie", "Toby"],
+    female: ["Bella", "Daisy", "Luna", "Coco", "Sophie", "Lola", "Ruby", "Penny", "Zoe", "Molly"]
+  };
+
+  const [generatedName, setGeneratedName] = useState<string | null>(null);
+  const [gender, setGender] = useState<'male' | 'female'>('female');
+
+  const generate = () => {
+    const list = names[gender];
+    const randomName = list[Math.floor(Math.random() * list.length)];
+    setGeneratedName(randomName);
+  };
+
+  return (
+    <div className="bg-stone-50 p-8 rounded-3xl border border-stone-100">
+      <h4 className="text-xl font-serif font-bold text-stone-900 mb-6">Puppy Name Generator</h4>
+      <div className="flex space-x-4 mb-8">
+        <button 
+          onClick={() => setGender('male')}
+          className={`flex-1 py-2 rounded-full font-medium transition-all ${gender === 'male' ? 'bg-brand-primary text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200'}`}
+        >
+          Boy
+        </button>
+        <button 
+          onClick={() => setGender('female')}
+          className={`flex-1 py-2 rounded-full font-medium transition-all ${gender === 'female' ? 'bg-brand-primary text-white shadow-md' : 'bg-white text-stone-600 border border-stone-200'}`}
+        >
+          Girl
+        </button>
+      </div>
+      
+      <div className="relative h-24 flex items-center justify-center bg-white rounded-2xl border border-stone-100 mb-6 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {generatedName ? (
+            <motion.div
+              key={generatedName}
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 1.2, opacity: 0 }}
+              className="text-3xl font-serif font-bold text-brand-primary"
+            >
+              {generatedName}
+            </motion.div>
+          ) : (
+            <div className="text-stone-400 italic">Click generate to find a name!</div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <button 
+        onClick={generate}
+        className="w-full py-4 bg-brand-accent text-white rounded-full font-bold hover:bg-brand-accent/90 transition-all shadow-lg flex items-center justify-center space-x-2"
+      >
+        <Sparkles className="w-5 h-5" />
+        <span>Generate Name</span>
+      </button>
+    </div>
+  );
+};
+const FAQPage = ({ settings }: { settings: SiteSettings }) => (
   <section className="py-24 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
     <SectionHeading title="Frequently Asked Questions" />
     <div className="space-y-6">
       {[
         { q: 'How much are your puppies?', a: 'Our pet-only puppies typically range from $2,500 to $4,500 depending on size, color, and pedigree.' },
         { q: 'Do you ship puppies?', a: 'We prefer local pickup in Austin, TX, but we can arrange for a flight nanny to deliver your puppy to your nearest major airport for an additional fee.' },
-        { q: 'What is included with the puppy?', a: 'Each puppy comes with a health guarantee, age-appropriate vaccinations, deworming, microchip, a sample of food, and a "scent blanket" from mom.' },
+        { q: 'What is included with the puppy?', a: settings.puppyStarterKit },
         { q: 'Are your dogs AKC registered?', a: 'Yes, all our breeding dogs are AKC registered. Puppies are sold with limited AKC registration (no breeding rights).' },
-        { q: 'How big will my Yorkie get?', a: 'Yorkies typically weigh between 4-7 lbs. We can provide an estimated adult weight based on the parents, but cannot guarantee it.' }
+        { q: 'How big will my Yorkie get?', a: 'Yorkies typically weigh between 4-7 lbs. We can provide an estimated adult weight based on the parents, but cannot guarantee it.' },
+        { q: 'What is your health guarantee?', a: settings.returnPolicy }
       ].map((item, i) => (
         <details key={i} className="group bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
           <summary className="flex justify-between items-center p-6 cursor-pointer font-bold text-stone-900 list-none">
@@ -2466,6 +3133,28 @@ const ApplicationPage = () => {
   };
 
   if (submitted) {
+    useEffect(() => {
+      const duration = 5 * 1000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+      const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+      const interval: any = setInterval(function() {
+        const timeLeft = animationEnd - Date.now();
+
+        if (timeLeft <= 0) {
+          return clearInterval(interval);
+        }
+
+        const particleCount = 50 * (timeLeft / duration);
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+        confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+      }, 250);
+
+      return () => clearInterval(interval);
+    }, []);
+
     return (
       <section className="py-24 max-w-2xl mx-auto px-4 text-center">
         <div className="bg-white p-12 rounded-[40px] shadow-sm border border-stone-100">
@@ -2492,7 +3181,10 @@ const ApplicationPage = () => {
         <form onSubmit={handleSubmit} className="space-y-10">
           {/* Section 1: Contact Info */}
           <div>
-            <h4 className="text-xl font-serif font-bold text-stone-900 mb-6 pb-2 border-b border-stone-100">Contact Information</h4>
+            <div className="flex items-center gap-3 mb-6 pb-2 border-b border-stone-100">
+              <span className="w-8 h-8 rounded-full bg-stone-900 text-white flex items-center justify-center text-sm font-bold">1</span>
+              <h4 className="text-xl font-serif font-bold text-stone-900">Contact Information</h4>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Full Name</label>
@@ -2539,7 +3231,10 @@ const ApplicationPage = () => {
 
           {/* Section 2: Lifestyle */}
           <div>
-            <h4 className="text-xl font-serif font-bold text-stone-900 mb-6 pb-2 border-b border-stone-100">Lifestyle & Home</h4>
+            <div className="flex items-center gap-3 mb-6 pb-2 border-b border-stone-100">
+              <span className="w-8 h-8 rounded-full bg-stone-900 text-white flex items-center justify-center text-sm font-bold">2</span>
+              <h4 className="text-xl font-serif font-bold text-stone-900">Lifestyle & Home</h4>
+            </div>
             <div className="space-y-6">
               <div>
                 <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Do you have other pets?</label>
@@ -2575,7 +3270,10 @@ const ApplicationPage = () => {
 
           {/* Section 3: Puppy Preferences */}
           <div>
-            <h4 className="text-xl font-serif font-bold text-stone-900 mb-6 pb-2 border-b border-stone-100">Puppy Preferences</h4>
+            <div className="flex items-center gap-3 mb-6 pb-2 border-b border-stone-100">
+              <span className="w-8 h-8 rounded-full bg-stone-900 text-white flex items-center justify-center text-sm font-bold">3</span>
+              <h4 className="text-xl font-serif font-bold text-stone-900">Puppy Preferences</h4>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-bold text-stone-500 uppercase mb-2">Preferred Gender</label>
@@ -2712,6 +3410,20 @@ function AppContent() {
     window.scrollTo(0, 0);
   }, [page]);
 
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 400);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const renderPage = () => {
     if (loading && page !== 'home') {
       return (
@@ -2726,7 +3438,7 @@ function AppContent() {
       case 'about': return <AboutPage settings={settings} />;
       case 'our-dogs': return <OurDogsPage dogs={dogs} puppies={puppies} setPage={setPage} />;
       case 'process': return <ProcessPage settings={settings} />;
-      case 'faq': return <FAQPage />;
+      case 'faq': return <FAQPage settings={settings} />;
       case 'contact': return <ContactPage settings={settings} />;
       case 'apply': return <ApplicationPage />;
       case 'admin': return isAdmin ? <AdminDashboard puppies={puppies} dogs={dogs} testimonials={testimonials} settings={settings} applications={applications} /> : <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
@@ -2752,6 +3464,22 @@ function AppContent() {
         </AnimatePresence>
       </main>
 
+      <AnimatePresence>
+        {showBackToTop && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            onClick={scrollToTop}
+            className="fixed bottom-8 right-8 z-50 p-4 bg-stone-900 text-white rounded-full shadow-2xl hover:bg-stone-800 transition-colors"
+            title="Back to Top"
+          >
+            <ChevronUp className="w-6 h-6" />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <YorkieAssistant />
       <Footer setPage={setPage} settings={settings} />
     </div>
   );

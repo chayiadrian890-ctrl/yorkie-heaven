@@ -11,6 +11,7 @@ import {
   MapPin, 
   ChevronRight, 
   ChevronLeft, 
+  ChevronDown,
   Star, 
   Menu, 
   X,
@@ -34,7 +35,8 @@ import {
   ChevronUp,
   Send,
   User,
-  Bot
+  Bot,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -47,11 +49,15 @@ import {
   onAuthStateChanged, 
   collection, 
   doc, 
+  getDoc,
+  getDocs,
+  addDoc,
   setDoc, 
   updateDoc,
   deleteDoc, 
   onSnapshot, 
   query, 
+  where,
   orderBy, 
   serverTimestamp 
 } from './firebase';
@@ -191,6 +197,7 @@ interface Animal {
   temperament?: string;
   achievements?: string;
   healthClearances?: string;
+  certifications?: string;
   createdAt?: any;
 }
 
@@ -381,9 +388,34 @@ const Navbar = ({ currentPage, setPage, user, isAdmin, settings }: { currentPage
               {isAdmin && (
                 <button
                   onClick={() => { setPage('admin'); setIsOpen(false); }}
-                  className="block w-full text-left px-3 py-3 text-base font-medium text-brand-primary hover:bg-stone-100 rounded-md"
+                  className="block w-full text-left px-3 py-3 text-base font-medium text-brand-primary hover:bg-stone-100 rounded-md flex items-center gap-2"
                 >
+                  <Settings className="h-5 w-5" />
                   Admin Dashboard
+                </button>
+              )}
+              {user ? (
+                <div className="flex items-center justify-between px-3 py-3 border-t border-stone-100 mt-2">
+                  <div className="flex items-center gap-3">
+                    <img src={user.photoURL} alt={user.displayName} className="h-8 w-8 rounded-full border border-stone-200" />
+                    <span className="text-sm font-medium text-stone-700">{user.displayName}</span>
+                  </div>
+                  <button 
+                    onClick={() => { signOut(auth); setIsOpen(false); }} 
+                    className="text-stone-500 hover:text-red-500 transition-colors flex items-center gap-2"
+                  >
+                    <LogOut className="h-5 w-5" />
+                    <span className="text-sm font-medium">Sign Out</span>
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => { handleLogin(); setIsOpen(false); }} 
+                  disabled={isLoggingIn}
+                  className="block w-full text-left px-3 py-3 text-base font-medium text-stone-600 hover:bg-stone-100 rounded-md flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isLoggingIn ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
+                  Admin Login
                 </button>
               )}
               <button 
@@ -584,16 +616,19 @@ const ApplicationModal = ({
   );
 };
 
-const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }: { puppies: Animal[], dogs: Animal[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[] }) => {
-  const [activeTab, setActiveTab] = useState<'dogs' | 'testimonials' | 'settings' | 'applications' | 'health'>('dogs');
+const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications, authorizedUsers }: { puppies: Animal[], dogs: Animal[], testimonials: Testimonial[], settings: SiteSettings, applications: Application[], authorizedUsers: any[] }) => {
+  const [activeTab, setActiveTab] = useState<'dogs' | 'testimonials' | 'settings' | 'applications' | 'health' | 'admins'>('dogs');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
   const [isGeneratingTestimonial, setIsGeneratingTestimonial] = useState(false);
   const [isGeneratingHealth, setIsGeneratingHealth] = useState(false);
+  const [isGeneratingHealthClearances, setIsGeneratingHealthClearances] = useState(false);
+  const [isAddingAdmin, setIsAddingAdmin] = useState(false);
   const [editingDogId, setEditingDogId] = useState<string | null>(null);
   const [dogCategory, setDogCategory] = useState<'Puppy' | 'Dam' | 'Sire'>('Puppy');
   const [editingTestimonialId, setEditingTestimonialId] = useState<string | null>(null);
   
+  const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newDog, setNewDog] = useState<any>({
     name: '',
     gender: 'Female',
@@ -608,7 +643,8 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     lineage: '',
     temperament: '',
     achievements: '',
-    healthClearances: ''
+    healthClearances: '',
+    certifications: ''
   });
   const [newTestimonial, setNewTestimonial] = useState<Partial<Testimonial>>({
     name: '',
@@ -666,6 +702,50 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
       setNewTestimonial(prev => ({ ...prev, image: compressed }));
     };
     reader.readAsDataURL(file);
+  };
+
+  const generateHealthClearances = async () => {
+    if (!newDog.name) {
+      alert("Please enter a name first.");
+      return;
+    }
+    
+    setIsGeneratingHealthClearances(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Generate professional health clearances and certifications for a ${dogCategory} Yorkshire Terrier named ${newDog.name}. 
+        Return a JSON object with two fields: 
+        1. "healthClearances": A string listing common OFA clearances (Heart, Eyes, Patellas) and AKC achievements.
+        2. "certifications": A string listing genetic testing results (PRA-PRCD, DM, HUU) and DNA profile info.
+        Keep it realistic for a high-quality breeding program.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              healthClearances: { type: Type.STRING },
+              certifications: { type: Type.STRING }
+            },
+            required: ["healthClearances", "certifications"]
+          }
+        }
+      });
+      
+      const data = JSON.parse(response.text);
+      if (data) {
+        setNewDog(prev => ({ 
+          ...prev, 
+          healthClearances: data.healthClearances,
+          certifications: data.certifications
+        }));
+      }
+    } catch (error) {
+      console.error("AI Generation failed", error);
+    } finally {
+      setIsGeneratingHealthClearances(false);
+    }
   };
 
   const generateDogImage = async () => {
@@ -797,6 +877,46 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
     }
   };
 
+  const handleAddAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAdminEmail) return;
+    setIsAddingAdmin(true);
+    try {
+      const userDoc = await getDoc(doc(db, 'users', newAdminEmail));
+      if (userDoc.exists()) {
+        setStatusMessage({ text: 'Admin already exists!', type: 'error' });
+        return;
+      }
+      
+      await setDoc(doc(db, 'users', newAdminEmail), {
+        email: newAdminEmail,
+        role: 'admin',
+        createdAt: serverTimestamp()
+      });
+      setNewAdminEmail('');
+      setStatusMessage({ text: 'Admin added successfully!', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'users');
+    } finally {
+      setIsAddingAdmin(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (id: string, email: string) => {
+    if (email === 'chayiadrian890@gmail.com') {
+      setStatusMessage({ text: 'Cannot delete primary admin!', type: 'error' });
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to remove ${email} from admins?`)) return;
+    
+    try {
+      await deleteDoc(doc(db, 'users', id));
+      setStatusMessage({ text: 'Admin removed successfully!', type: 'success' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'users');
+    }
+  };
+
   const handleSaveDog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDog.name || !newDog.image) return;
@@ -821,6 +941,7 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         delete dogData.temperament;
         delete dogData.achievements;
         delete dogData.healthClearances;
+        delete dogData.certifications;
       } else {
         delete dogData.gender;
         delete dogData.status;
@@ -866,7 +987,8 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
         lineage: '',
         temperament: '',
         achievements: '',
-        healthClearances: ''
+        healthClearances: '',
+        certifications: ''
       });
     } catch (error) {
       console.error("Failed to save dog", error);
@@ -1174,6 +1296,12 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
             </span>
           )}
         </button>
+        <button 
+          onClick={() => setActiveTab('admins')}
+          className={`pb-4 px-4 font-bold whitespace-nowrap transition-all ${activeTab === 'admins' ? 'text-brand-primary border-b-2 border-brand-primary' : 'text-stone-400'}`}
+        >
+          Manage Admins
+        </button>
       </div>
 
       {activeTab === 'dogs' && (
@@ -1341,13 +1469,31 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
                       ></textarea>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-stone-500 uppercase mb-1">Achievements / Health Clearances</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-stone-500 uppercase">Health Clearances & Certifications</label>
+                        <button 
+                          type="button"
+                          onClick={generateHealthClearances}
+                          disabled={isGeneratingHealthClearances}
+                          className="text-[10px] font-bold text-brand-primary hover:text-brand-accent flex items-center transition-colors disabled:opacity-50"
+                        >
+                          {isGeneratingHealthClearances ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                          AI Generate
+                        </button>
+                      </div>
                       <textarea 
                         rows={2} 
                         value={newDog.healthClearances}
                         onChange={e => setNewDog({...newDog, healthClearances: e.target.value})}
-                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm mb-2"
                         placeholder="e.g., OFA Heart/Eyes, AKC Champion..."
+                      ></textarea>
+                      <textarea 
+                        rows={2} 
+                        value={newDog.certifications}
+                        onChange={e => setNewDog({...newDog, certifications: e.target.value})}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm"
+                        placeholder="e.g., Genetic Panel Clear, DNA Profile..."
                       ></textarea>
                     </div>
                   </>
@@ -2053,6 +2199,84 @@ const AdminDashboard = ({ puppies, dogs, testimonials, settings, applications }:
           )}
         </div>
       )}
+
+      {activeTab === 'admins' && (
+        <div className="max-w-3xl mx-auto">
+          <div className="bg-white p-8 rounded-[40px] shadow-sm border border-stone-100 mb-8">
+            <h3 className="text-2xl font-serif font-bold flex items-center mb-6">
+              <ShieldCheck className="h-6 w-6 mr-2 text-brand-primary" /> Manage Authorized Admins
+            </h3>
+            <p className="text-stone-500 text-sm mb-8">
+              Add email addresses of authorized administrators. These users will be able to sign in using their Google accounts and access this dashboard.
+            </p>
+            
+            <form onSubmit={handleAddAdmin} className="flex gap-4 mb-12">
+              <div className="flex-1">
+                <label className="block text-xs font-bold text-stone-500 uppercase mb-2">New Admin Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+                  <input 
+                    type="email" 
+                    value={newAdminEmail}
+                    onChange={e => setNewAdminEmail(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-12 pr-4 py-3" 
+                    placeholder="admin@example.com" 
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <button 
+                  type="submit"
+                  disabled={isAddingAdmin}
+                  className="bg-stone-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-stone-800 transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isAddingAdmin ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Add Admin
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-4">Authorized Emails</h4>
+              <div className="bg-stone-50 rounded-2xl border border-stone-100 divide-y divide-stone-100">
+                {/* Default Admin (Hardcoded for safety) */}
+                <div className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-brand-secondary text-brand-primary flex items-center justify-center">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-stone-900">chayiadrian890@gmail.com</p>
+                      <p className="text-[10px] text-brand-primary font-bold uppercase tracking-wider">Primary Admin (System)</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {authorizedUsers.filter(u => u.email !== 'chayiadrian890@gmail.com').map(admin => (
+                  <div key={admin.id} className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-stone-200 text-stone-500 flex items-center justify-center">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-stone-900">{admin.email}</p>
+                        <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">Authorized Admin</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteAdmin(admin.id, admin.email)}
+                      className="p-2 text-stone-300 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2556,88 +2780,189 @@ const AboutPage = ({ settings }: { settings: SiteSettings }) => (
   </section>
 );
 
-const DogDetailModal: React.FC<{ dog: Animal, onClose: () => void }> = ({ dog, onClose }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.9, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.9, y: 20 }}
-      className="bg-white rounded-[40px] shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
-    >
-      <div className="md:w-1/2 relative h-64 md:h-auto">
-        <img src={dog.image} alt={dog.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-        <button 
-          onClick={onClose}
-          className="absolute top-4 left-4 p-2 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-md transition-all md:hidden"
-        >
-          <X className="h-6 w-6" />
-        </button>
-      </div>
-      <div className="md:w-1/2 p-8 md:p-12 overflow-y-auto">
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h2 className="text-4xl font-serif font-bold text-stone-900 mb-2">{dog.name}</h2>
-            <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest">{dog.role}</span>
-          </div>
+const DogDetailModal: React.FC<{ dog: Animal, onClose: () => void }> = ({ dog, onClose }) => {
+  const [isHealthExpanded, setIsHealthExpanded] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="bg-white rounded-[40px] shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
+      >
+        <div className="md:w-1/2 relative h-64 md:h-auto">
+          <img src={dog.image} alt={dog.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           <button 
             onClick={onClose}
-            className="p-2 hover:bg-stone-100 rounded-full text-stone-400 transition-all hidden md:block"
+            className="absolute top-4 left-4 p-2 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-md transition-all md:hidden"
           >
             <X className="h-6 w-6" />
           </button>
         </div>
-
-        <div className="grid grid-cols-2 gap-6 mb-8">
-          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Weight</p>
-            <p className="font-medium text-stone-900">{dog.weight || 'N/A'}</p>
+        <div className="md:w-1/2 p-8 md:p-12 overflow-y-auto">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h2 className="text-4xl font-serif font-bold text-stone-900 mb-2">{dog.name}</h2>
+              <span className="bg-brand-secondary text-brand-primary px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest">{dog.role}</span>
+            </div>
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-stone-100 rounded-full text-stone-400 transition-all hidden md:block"
+            >
+              <X className="h-6 w-6" />
+            </button>
           </div>
-          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
-            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Color</p>
-            <p className="font-medium text-stone-900">{dog.color || 'N/A'}</p>
+
+          <div className="grid grid-cols-2 gap-6 mb-8">
+            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Weight</p>
+              <p className="font-medium text-stone-900">{dog.weight || 'N/A'}</p>
+            </div>
+            <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+              <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Color</p>
+              <p className="font-medium text-stone-900">{dog.color || 'N/A'}</p>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            {dog.lineage && (
+              <div>
+                <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
+                  <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
+                  Lineage & Pedigree
+                </h4>
+                <p className="text-stone-600 text-sm leading-relaxed">{dog.lineage}</p>
+              </div>
+            )}
+            {dog.temperament && (
+              <div>
+                <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
+                  <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
+                  Temperament
+                </h4>
+                <p className="text-stone-600 text-sm leading-relaxed">{dog.temperament}</p>
+              </div>
+            )}
+            
+            {(dog.healthClearances || dog.certifications) && (
+              <div className="border border-stone-100 rounded-2xl overflow-hidden">
+                <button 
+                  onClick={() => setIsHealthExpanded(!isHealthExpanded)}
+                  className="w-full p-4 bg-stone-50 flex items-center justify-between hover:bg-stone-100 transition-colors"
+                >
+                  <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest flex items-center">
+                    <ShieldCheck className="h-4 w-4 mr-2 text-brand-primary" />
+                    Health & Certifications
+                  </h4>
+                  {isHealthExpanded ? <ChevronUp className="h-4 w-4 text-stone-400" /> : <ChevronDown className="h-4 w-4 text-stone-400" />}
+                </button>
+                <AnimatePresence>
+                  {isHealthExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="p-4 space-y-4 bg-white"
+                    >
+                      {dog.healthClearances && (
+                        <div>
+                          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Clearances</p>
+                          <p className="text-stone-600 text-sm leading-relaxed">{dog.healthClearances}</p>
+                        </div>
+                      )}
+                      {dog.certifications && (
+                        <div>
+                          <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Certifications</p>
+                          <p className="text-stone-600 text-sm leading-relaxed">{dog.certifications}</p>
+                        </div>
+                      )}
+                      <div className="pt-2">
+                        <a 
+                          href="#health-guarantee" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            onClose();
+                            // We'll need a way to navigate to the health section on the Process page
+                            // For now, let's assume we can set the page to 'process' and scroll
+                            window.location.hash = 'health-guarantee';
+                          }}
+                          className="text-xs font-bold text-brand-primary hover:text-brand-accent underline underline-offset-4 flex items-center"
+                        >
+                          View Full Health Guarantee & Policies
+                          <ChevronRight className="h-3 w-3 ml-1" />
+                        </a>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-12 pt-8 border-t border-stone-100">
+            <div className="flex items-center space-x-4 text-xs text-stone-400">
+              <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> Health Tested</div>
+              <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> AKC Registered</div>
+            </div>
           </div>
         </div>
+      </motion.div>
+    </div>
+  );
+};
 
-        <div className="space-y-8">
-          {dog.lineage && (
-            <div>
-              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
-                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
-                Lineage & Pedigree
-              </h4>
-              <p className="text-stone-600 text-sm leading-relaxed">{dog.lineage}</p>
-            </div>
-          )}
-          {dog.temperament && (
-            <div>
-              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
-                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
-                Temperament
-              </h4>
-              <p className="text-stone-600 text-sm leading-relaxed">{dog.temperament}</p>
-            </div>
-          )}
-          {dog.healthClearances && (
-            <div>
-              <h4 className="text-sm font-bold text-stone-900 uppercase tracking-widest mb-3 flex items-center">
-                <div className="w-4 h-0.5 bg-brand-accent mr-2"></div>
-                Health & Achievements
-              </h4>
-              <p className="text-stone-600 text-sm leading-relaxed">{dog.healthClearances}</p>
-            </div>
-          )}
-        </div>
+const HealthClearanceCollapse = ({ dog, setPage }: { dog: Animal, setPage: (p: Page) => void }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  if (!dog.healthClearances && !dog.certifications) return null;
 
-        <div className="mt-12 pt-8 border-t border-stone-100">
-          <div className="flex items-center space-x-4 text-xs text-stone-400">
-            <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> Health Tested</div>
-            <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-1 text-brand-accent" /> AKC Registered</div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  </div>
-);
+  return (
+    <div className="mt-6 border-t border-stone-100 pt-6">
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center justify-between w-full text-stone-900 hover:text-brand-primary transition-colors"
+      >
+        <span className="text-sm font-bold uppercase tracking-widest flex items-center">
+          <ShieldCheck className="h-4 w-4 mr-2 text-brand-accent" />
+          Health Clearances
+        </span>
+        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+      </button>
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-4 space-y-3">
+              {dog.healthClearances && (
+                <div>
+                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Clearances</p>
+                  <p className="text-stone-600 text-xs leading-relaxed">{dog.healthClearances}</p>
+                </div>
+              )}
+              {dog.certifications && (
+                <div>
+                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1">Certifications</p>
+                  <p className="text-stone-600 text-xs leading-relaxed">{dog.certifications}</p>
+                </div>
+              )}
+              <button 
+                onClick={() => setPage('process')}
+                className="text-[10px] font-bold text-brand-primary hover:text-brand-accent underline underline-offset-4 flex items-center mt-2"
+              >
+                Learn about our Health Policies
+                <ChevronRight className="h-3 w-3 ml-1" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Animal[], setPage: (p: Page) => void }) => {
   const [selectedDog, setSelectedDog] = useState<Animal | null>(null);
@@ -2736,9 +3061,10 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
                 </div>
+                <HealthClearanceCollapse dog={dog} setPage={setPage} />
                 <button 
                   onClick={() => setSelectedDog(dog)}
-                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group"
+                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group mt-8"
                 >
                   View Full Profile
                   <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -2778,9 +3104,10 @@ const OurDogsPage = ({ dogs, puppies, setPage }: { dogs: Animal[], puppies: Anim
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> Health Tested</div>
                   <div className="flex items-center"><CheckCircle2 className="h-4 w-4 mr-2 text-brand-accent" /> AKC Registered</div>
                 </div>
+                <HealthClearanceCollapse dog={dog} setPage={setPage} />
                 <button 
                   onClick={() => setSelectedDog(dog)}
-                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group"
+                  className="w-full py-3 bg-stone-900 text-white rounded-full font-bold hover:bg-stone-800 transition-all flex items-center justify-center group mt-8"
                 >
                   View Full Profile
                   <ChevronRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -2829,7 +3156,7 @@ const ProcessPage = ({ settings }: { settings: SiteSettings }) => (
       ))}
     </div>
 
-    <div className="bg-brand-secondary rounded-[48px] p-8 md:p-16 border border-stone-100">
+    <div id="health-guarantee" className="bg-brand-secondary rounded-[48px] p-8 md:p-16 border border-stone-100">
       <div className="text-center mb-16">
         <h3 className="text-3xl md:text-4xl font-serif font-bold text-stone-900 mb-4">Health Guarantee & Policies</h3>
         <p className="text-stone-600 max-w-2xl mx-auto">We take the health of our puppies seriously. Here is what you can expect when you adopt from us.</p>
@@ -3335,6 +3662,7 @@ function AppContent() {
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [authorizedUsers, setAuthorizedUsers] = useState<any[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -3344,12 +3672,50 @@ function AppContent() {
 
   // Auth Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Check if user is admin (hardcoded for initial setup or check Firestore)
-        setIsAdmin(user.email === 'chayiadrian890@gmail.com');
+        // Default admin
+        if (user.email === 'chayiadrian890@gmail.com') {
+          setUser(user);
+          setIsAdmin(true);
+          return;
+        }
+        
+        // Check Firestore for admin role
+        try {
+          // Check by email-based document first (authorized admins)
+          const authorizedDoc = await getDoc(doc(db, 'users', user.email || ''));
+          let authorized = false;
+          
+          if (authorizedDoc.exists() && authorizedDoc.data().role === 'admin') {
+            authorized = true;
+          } else {
+            // Check by UID-based document
+            const userDoc = await getDoc(doc(db, 'users', user.uid));
+            if (userDoc.exists() && userDoc.data().role === 'admin') {
+              authorized = true;
+            }
+          }
+
+          if (authorized) {
+            setUser(user);
+            setIsAdmin(true);
+          } else {
+            // NOT AUTHORIZED - Sign out immediately
+            console.warn("Unauthorized login attempt:", user.email);
+            await signOut(auth);
+            setUser(null);
+            setIsAdmin(false);
+            alert("Access Denied: Your email is not authorized to access this portal.");
+          }
+        } catch (e) {
+          console.error("Error checking admin status", e);
+          await signOut(auth);
+          setUser(null);
+          setIsAdmin(false);
+        }
       } else {
+        setUser(null);
         setIsAdmin(false);
       }
     });
@@ -3377,6 +3743,7 @@ function AppContent() {
     });
 
     let unsubApplications = () => {};
+    let unsubUsers = () => {};
     if (isAdmin) {
       const qApplications = query(collection(db, 'applications'), orderBy('createdAt', 'desc'));
       unsubApplications = onSnapshot(qApplications, (snapshot) => {
@@ -3384,6 +3751,14 @@ function AppContent() {
         setApplications(data);
       }, (error) => {
         handleFirestoreError(error, OperationType.LIST, 'applications');
+      });
+
+      const qUsers = query(collection(db, 'users'), where('role', '==', 'admin'));
+      unsubUsers = onSnapshot(qUsers, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        setAuthorizedUsers(data.sort((a: any, b: any) => (a.email || '').localeCompare(b.email || '')));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'users');
       });
     }
 
@@ -3401,6 +3776,7 @@ function AppContent() {
       unsubAnimals();
       unsubTestimonials();
       unsubApplications();
+      unsubUsers();
       unsubSettings();
     };
   }, [isAdmin]);
@@ -3441,7 +3817,7 @@ function AppContent() {
       case 'faq': return <FAQPage settings={settings} />;
       case 'contact': return <ContactPage settings={settings} />;
       case 'apply': return <ApplicationPage />;
-      case 'admin': return isAdmin ? <AdminDashboard puppies={puppies} dogs={dogs} testimonials={testimonials} settings={settings} applications={applications} /> : <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
+      case 'admin': return isAdmin ? <AdminDashboard puppies={puppies} dogs={dogs} testimonials={testimonials} settings={settings} applications={applications} authorizedUsers={authorizedUsers} /> : <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
       default: return <HomePage setPage={setPage} puppies={puppies} testimonials={testimonials} settings={settings} settingsLoading={settingsLoading} />;
     }
   };

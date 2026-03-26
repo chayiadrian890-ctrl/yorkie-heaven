@@ -23,7 +23,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "chayiadrian890@gmail.com");
+        (request.auth.token.email == "chayiadrian890@gmail.com" || 
+         (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'admin'));
     }
 
     function isValidAnimal(data) {
@@ -53,6 +55,11 @@ service cloud.firestore {
              data.status in ['Pending', 'Approved', 'Rejected'];
     }
 
+    function isValidUser(data) {
+      return data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['admin', 'user'];
+    }
+
     // Rules
     match /animals/{animalId} {
       allow read: if true;
@@ -67,10 +74,9 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || (request.auth.token.email == "chayiadrian890@gmail.com" && request.auth.token.email_verified == true));
-      allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'user';
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isAuthenticated() && (request.auth.uid == userId || request.auth.token.email == userId || isAdmin());
+      allow create: if ((isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'user') || isAdmin()) && isValidUser(request.resource.data);
+      allow update, delete: if isAdmin() && isValidUser(request.resource.data);
     }
 
     match /settings/{settingId} {
